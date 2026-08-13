@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal Screener — v1</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#EDF1F0;
+    --card:#FFFFFF;
+    --ink:#16233D;
+    --ink-soft:#4A5568;
+    --line:#D8DEDC;
+    --high:#1F7A5C;
+    --high-bg:#E5F3EC;
+    --moderate:#B8862B;
+    --moderate-bg:#FBF1DE;
+    --early:#5B6B7A;
+    --early-bg:#E9EDF0;
+    --verify:#9C6B1F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    padding:40px 20px 80px;
+  }
+  .wrap{max-width:760px; margin:0 auto;}
+
+  header{margin-bottom:36px;}
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+  }
+  h1{
+    font-family:'Source Serif 4', serif;
+    font-weight:700;
+    font-size:34px;
+    margin:0 0 10px;
+    letter-spacing:-0.01em;
+  }
+  .sub{
+    color:var(--ink-soft);
+    font-size:15px;
+    line-height:1.55;
+    max-width:60ch;
+  }
+
+  .banner{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-left:4px solid var(--verify);
+    border-radius:6px;
+    padding:16px 18px;
+    margin:24px 0 36px;
+    font-size:14px;
+    line-height:1.6;
+    color:var(--ink-soft);
+  }
+  .banner b{color:var(--ink);}
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:8px;
+    margin-bottom:20px;
+    display:flex;
+    overflow:hidden;
+    opacity:0;
+    animation:rise 0.45s ease forwards;
+  }
+  .card:nth-child(1){animation-delay:.02s}
+  .card:nth-child(2){animation-delay:.08s}
+  .card:nth-child(3){animation-delay:.14s}
+  .card:nth-child(4){animation-delay:.20s}
+  .card:nth-child(5){animation-delay:.26s}
+  @keyframes rise{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+  .tab{width:6px; flex-shrink:0;}
+  .tab.high{background:var(--high);}
+  .tab.moderate{background:var(--moderate);}
+  .tab.early{background:var(--early);}
+
+  .body{padding:20px 22px; flex:1; min-width:0;}
+
+  .top-row{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; flex-wrap:wrap; margin-bottom:6px;
+  }
+  .drug-name{
+    font-family:'Source Serif 4', serif;
+    font-weight:600;
+    font-size:19px;
+  }
+  .ticker{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    background:var(--bg);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:3px 8px;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .ticker.unverified{border-style:dashed; color:var(--verify);}
+
+  .meta{
+    font-size:13px; color:var(--ink-soft); margin-bottom:14px; line-height:1.6;
+  }
+  .meta strong{color:var(--ink); font-weight:500;}
+
+  .flag{
+    display:inline-block;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    letter-spacing:0.03em;
+    text-transform:uppercase;
+    padding:3px 9px;
+    border-radius:20px;
+    margin-bottom:14px;
+  }
+  .flag.high{background:var(--high-bg); color:var(--high);}
+  .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
+  .flag.early{background:var(--early-bg); color:var(--early);}
+
+  .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:16px;}
+
+  .verify-row{
+    border-top:1px dashed var(--line);
+    padding-top:12px;
+    display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+  }
+  .verify-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px; text-transform:uppercase; letter-spacing:0.05em;
+    color:var(--ink-soft); margin-right:2px;
+  }
+  .verify-row a{
+    font-size:12.5px;
+    color:var(--verify);
+    text-decoration:none;
+    border-bottom:1px solid transparent;
+    padding:2px 0;
+  }
+  .verify-row a:hover, .verify-row a:focus-visible{
+    border-bottom-color:var(--verify);
+    outline:none;
+  }
+  .verify-row a:focus-visible{outline:2px solid var(--verify); outline-offset:2px; border-radius:2px;}
+
+  .closer-look{margin:0 22px 20px; padding-top:14px; border-top:1px dashed var(--line);}
+  .closer-look-title{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:10px;}
+  .cl-row{display:flex; gap:12px; margin-bottom:10px; font-size:13px; line-height:1.55;}
+  .cl-label{width:100px; flex-shrink:0; font-weight:500; color:var(--ink);}
+  .cl-value{flex:1; color:var(--ink-soft);}
+  .bull-bear{display:flex; gap:12px; margin-top:4px;}
+  .bb-col{flex:1; background:var(--bg); border-radius:6px; padding:9px 11px;}
+  .bb-col.bull{border-left:3px solid var(--high);}
+  .bb-col.bear{border-left:3px solid var(--moderate);}
+  .bb-title{font-family:'IBM Plex Mono', monospace; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px;}
+  .bb-col.bull .bb-title{color:var(--high);}
+  .bb-col.bear .bb-title{color:var(--moderate);}
+  .bb-text{font-size:12px; line-height:1.5; color:var(--ink);}
+  .thin-coverage{font-size:11.5px; color:var(--verify); font-style:italic; margin-top:2px;}
+
+  footer{
+    margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.7;
+    border-top:1px solid var(--line); padding-top:18px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Signal Screener · v1 · Personal use</div>
+    <h1>This week's breakthrough signals</h1>
+    <div class="sub">Recent FDA Breakthrough Therapy and Orphan Drug designations, summarized in plain language. Every entry links to the source it came from — click through before you trust it.</div>
+  </header>
+
+  <div class="banner">
+    <b>How to validate this:</b> each card below has a "Verify" row at the bottom. Click those links — they go to the actual FDA/company announcement or a page reporting on it. If a fact here doesn't match what you find at the source, trust the source, not this summary. This demo pulled from live web search just now, not a real-time feed yet.
+  </div>
+
+  <!-- Card 1 -->
+  <div class="card">
+    <div class="tab moderate"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">NXC-201 (Immix Biopharma)</div>
+        <div class="ticker">IMMX</div>
+      </div>
+      <div class="meta"><strong>Breakthrough Therapy</strong> · granted late Jan 2026 · Relapsed/refractory AL amyloidosis</div>
+      <div class="flag moderate">Moderate signal</div>
+      <div class="read">A CAR-T cell therapy for a rare blood disorder that currently has no approved treatments — that "no approved therapy exists" detail matters clinically, since any effective option would be the first of its kind, not just an improvement on existing ones. The designation rests on interim Phase 2 results from a registrational-design trial, which is a reasonably mature stage of evidence, though the data is still interim rather than final.</div>
+      <div class="closer-look">
+        <div class="closer-look-title">Why this is worth a closer look</div>
+        <div class="cl-row"><div class="cl-label">Growth trend</div><div class="cl-value">Pre-revenue clinical-stage company — no product sales yet, so "growth" here means trial progress and cash runway, not revenue.</div></div>
+        <div class="cl-row"><div class="cl-label">Analyst range</div><div class="cl-value">Only 1-5 analysts cover this stock depending on the source, and their targets vary wildly ($7 to $23) — that inconsistency is itself useful information: this is a thinly covered, illiquid microcap, not a stock with a settled market view.</div>
+        </div>
+        <div class="bull-bear">
+          <div class="bb-col bull"><div class="bb-title">Bull case</div><div class="bb-text">First-in-class potential for a condition with no approved therapy; Breakthrough designation signals FDA sees real promise.</div></div>
+          <div class="bb-col bear"><div class="bb-title">Bear case</div><div class="bb-text">Tiny company, thin analyst coverage, interim (not final) trial data — high uncertainty in either direction.</div></div>
+        </div>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://www.barchart.com/story/news/37273334/immix-biopharma-receives-u-s-fda-breakthrough-therapy-designation-for-nxc-201" target="_blank" rel="noopener">Company announcement</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 2 -->
+  <div class="card">
+    <div class="tab moderate"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Sofetabart mipitecan (Eli Lilly)</div>
+        <div class="ticker">LLY</div>
+      </div>
+      <div class="meta"><strong>Breakthrough Therapy</strong> · granted Jan 20, 2026 · Platinum-resistant ovarian cancer</div>
+      <div class="flag moderate">Moderate signal</div>
+      <div class="read">An antibody-drug conjugate for a cancer subtype that becomes much harder to treat once it stops responding to standard chemotherapy. Coming from Lilly rather than a small biotech means it has more development resources behind it, but the announcement itself doesn't specify trial phase — worth checking Lilly's clinical trial registry entry directly for that detail before reading too much into it.</div>
+      <div class="closer-look">
+        <div class="closer-look-title">Why this is worth a closer look</div>
+        <div class="cl-row"><div class="cl-label">Growth trend</div><div class="cl-value">Lilly just reported Q2 2026 earnings today (Aug 5): revenue up 47.7% year-over-year to $22.97B, beating estimates by over 11%, driven mainly by its GLP-1 weight-loss/diabetes drugs. Full-year guidance was raised to $85–87B.</div></div>
+        <div class="cl-row"><div class="cl-label">Analyst range</div><div class="cl-value">28-38 analysts (depending on source) average a "Buy" rating with 12-month targets clustering around $1,225–$1,277 — a fairly tight range for a stock this size, reflecting broad analyst agreement.</div></div>
+        <div class="bull-bear">
+          <div class="bb-col bull"><div class="bb-title">Bull case</div><div class="bb-text">Dominant, still-accelerating position in the obesity/diabetes drug market; guidance raised twice this year; oral GLP-1 pill just launched, opening a bigger market.</div></div>
+          <div class="bb-col bear"><div class="bb-title">Bear case</div><div class="bb-text">Operating margin actually fell (39.1% vs 44.1% a year ago) even as revenue surged — growth is being bought with heavier spending, and the stock already prices in a lot of future success.</div></div>
+        </div>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://investor.lilly.com/news-releases/news-release-details/lillys-sofetabart-mipitecan-receives-us-fdas-breakthrough" target="_blank" rel="noopener">Lilly investor release</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 3 -->
+  <div class="card">
+    <div class="tab moderate"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">NGN-401 (Neurogene)</div>
+        <div class="ticker">NGNE</div>
+      </div>
+      <div class="meta"><strong>Breakthrough Therapy</strong> · early 2026 · Rett syndrome (gene therapy)</div>
+      <div class="flag moderate">Moderate signal</div>
+      <div class="read">A one-time gene therapy for Rett syndrome, a severe neurological condition with essentially no disease-modifying treatments today. The designation is based on interim Phase 1/2 data showing durable improvement across multiple functional domains — durability across domains, not just one symptom, is the more clinically convincing part. Full dosing in the registrational trial wasn't complete as of the announcement, so this is still earlier-stage than the amyloidosis entry above.</div>
+      <div class="closer-look">
+        <div class="closer-look-title">Why this is worth a closer look</div>
+        <div class="cl-value" style="margin-bottom:8px;">Pre-revenue, clinical-stage company — I did not find reliable, current analyst price-target coverage for NGNE at the time of this snapshot. <span class="thin-coverage">That absence is itself a data point: this is a story still mostly unknown to Wall Street, not one it has already priced in.</span> Worth checking a source like stockanalysis.com directly for current coverage before treating this as settled.</div>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://www.levelfields.ai/news/top-breakthrough-therapy-designations-of-2026" target="_blank" rel="noopener">Designation summary</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 4 -->
+  <div class="card">
+    <div class="tab early"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Luvesilocin / RE104 (Reunion Neuroscience)</div>
+        <div class="ticker">REUN</div>
+      </div>
+      <div class="meta"><strong>Breakthrough Therapy</strong> · Feb 23, 2026 · Postpartum depression</div>
+      <div class="flag early">Early stage</div>
+      <div class="read">A psychedelic-inspired therapy for postpartum depression, based on a Phase 2 trial that reported a statistically significant reduction in depression scores within a week, with effects reportedly sustained through 28 days. Confirmed trading on NASDAQ/TSX under REUN — but this is a very small company (roughly $13M market cap) that has lost most of its value over the past year, which is a materially different risk profile than the Lilly entry above even though both carry the same designation type.</div>
+      <div class="closer-look">
+        <div class="closer-look-title">Why this is worth a closer look</div>
+        <div class="cl-value" style="margin-bottom:8px;">Pre-revenue, high-risk microcap. <span class="thin-coverage">I did not find meaningful analyst coverage — at this size and with this recent a decline, the stock likely trades more on speculative interest than on institutional research.</span> Treat any figures you find elsewhere on this one with extra skepticism and check the date carefully.</div>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://reunionneuro.com/2026/02/23/u-s-fda-grants-reunion-neurosciences-luvesilocin-re104-breakthrough-therapy-designation-status/" target="_blank" rel="noopener">Company press release</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 5 -->
+  <div class="card">
+    <div class="tab high"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Nomlabofusp (Larimar Therapeutics)</div>
+        <div class="ticker">LRMR</div>
+      </div>
+      <div class="meta"><strong>Breakthrough Therapy</strong> · early 2026 · Friedreich's ataxia</div>
+      <div class="flag high">High signal</div>
+      <div class="read">A protein-replacement therapy for a rare, progressive genetic disorder that currently has very limited treatment options. The FDA has reportedly continued discussions around using a biomarker (skin frataxin levels) as a surrogate endpoint, which — if it holds — could meaningfully shorten the path to an accelerated approval decision, expected to be filed by mid-2026.</div>
+      <div class="closer-look">
+        <div class="closer-look-title">Why this is worth a closer look</div>
+        <div class="cl-value" style="margin-bottom:8px;">Shares reportedly rose over 31% on this news, per the source below — a meaningful market reaction, though single-day moves like this can overshoot in either direction. I did not independently pull current analyst price targets for this snapshot; check stockanalysis.com or a similar source directly for up-to-date coverage before relying on this.</div>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://www.levelfields.ai/news/top-breakthrough-therapy-designations-of-2026" target="_blank" rel="noopener">Designation summary</a>
+        <a href="https://www.fda.gov/drugs/nda-and-bla-approvals/breakthrough-therapy-approvals" target="_blank" rel="noopener">FDA official BT list</a>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <b>This is v1, built manually today</b> — I pulled these five via live web search, not an automated feed. A real running version (built in Claude Code, on your own machine) would pull directly from FDA's official list and ClinicalTrials.gov on a schedule, so you'd never have to ask me to check by hand. Every ticker shown here has been independently confirmed against a real stock data source. Confidence flags are kept to exactly one of three labels (High/Moderate/Early stage), with extra context in the write-up rather than folded into the flag. Nothing here is a recommendation to buy or sell anything — treat "signal" as "clinically notable," not "invest now."
+  </footer>
+
+</div>
+</body>
+</html>

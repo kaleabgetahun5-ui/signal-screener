@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEFL Screener — v1</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#EDF1F0; --card:#FFFFFF; --ink:#16233D; --ink-soft:#4A5568; --line:#D8DEDC;
+    --high:#1F7A5C; --high-bg:#E5F3EC;
+    --moderate:#B8862B; --moderate-bg:#FBF1DE;
+    --early:#5B6B7A; --early-bg:#E9EDF0;
+    --verify:#9C6B1F;
+    --bar-track:#EDF1F0; --bar-stock:#1F7A5C; --bar-index:#8B95A1;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
+  .wrap{max-width:780px; margin:0 auto;}
+  header{margin-bottom:36px;}
+  .eyebrow{font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:10px;}
+  h1{font-family:'Source Serif 4', serif; font-weight:700; font-size:34px; margin:0 0 10px; letter-spacing:-0.01em;}
+  .sub{color:var(--ink-soft); font-size:15px; line-height:1.55; max-width:62ch;}
+
+  .banner{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--verify); border-radius:6px; padding:16px 18px; margin:24px 0 36px; font-size:14px; line-height:1.6; color:var(--ink-soft);}
+  .banner b{color:var(--ink);}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:22px; overflow:hidden; opacity:0; animation:rise .45s ease forwards;}
+  .card:nth-child(1){animation-delay:.02s} .card:nth-child(2){animation-delay:.1s}
+  @keyframes rise{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+  .card-head{padding:20px 22px 0;}
+  .top-row{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:8px;}
+  .company-name{font-family:'Source Serif 4', serif; font-weight:600; font-size:20px;}
+  .ticker{font-family:'IBM Plex Mono', monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:3px 8px; color:var(--ink-soft); white-space:nowrap;}
+
+  .flag{display:inline-block; font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.03em; text-transform:uppercase; padding:3px 9px; border-radius:20px; margin-bottom:12px;}
+  .flag.high{background:var(--high-bg); color:var(--high);}
+  .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
+
+  .meta{font-size:13px; color:var(--ink-soft); margin-bottom:14px; line-height:1.6;}
+  .meta strong{color:var(--ink); font-weight:500;}
+  .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:8px;}
+
+  .backtest{background:var(--bg); margin:16px 22px; border-radius:6px; padding:16px 18px;}
+  .backtest-title{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:12px;}
+  .bt-row{display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:13px;}
+  .bt-label{width:110px; flex-shrink:0; color:var(--ink-soft);}
+  .bt-track{flex:1; background:var(--bar-track); border-radius:4px; height:10px; overflow:hidden; border:1px solid var(--line);}
+  .bt-fill{height:100%; border-radius:4px;}
+  .bt-fill.stock{background:var(--bar-stock);}
+  .bt-fill.index{background:var(--bar-index);}
+  .bt-value{width:80px; text-align:right; font-family:'IBM Plex Mono', monospace; font-size:12.5px; flex-shrink:0;}
+  .bt-note{font-size:11.5px; color:var(--ink-soft); margin-top:8px; line-height:1.5;}
+
+  .closer-look{margin:16px 22px; padding-top:16px; border-top:1px dashed var(--line);}
+  .closer-look-title{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:12px;}
+  .cl-row{display:flex; gap:12px; margin-bottom:12px; font-size:13.5px; line-height:1.55;}
+  .cl-label{width:112px; flex-shrink:0; font-weight:500; color:var(--ink);}
+  .cl-value{flex:1; color:var(--ink-soft);}
+  .bull-bear{display:flex; gap:14px; margin-top:2px;}
+  .bb-col{flex:1; background:var(--bg); border-radius:6px; padding:10px 12px;}
+  .bb-col.bull{border-left:3px solid var(--high);}
+  .bb-col.bear{border-left:3px solid var(--moderate);}
+  .bb-title{font-family:'IBM Plex Mono', monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:5px;}
+  .bb-col.bull .bb-title{color:var(--high);}
+  .bb-col.bear .bb-title{color:var(--moderate);}
+  .bb-text{font-size:12.5px; line-height:1.55; color:var(--ink);}
+
+  .verify-row{border-top:1px dashed var(--line); padding:14px 22px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .verify-label{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-right:2px;}
+  .verify-row a{font-size:12.5px; color:var(--verify); text-decoration:none; border-bottom:1px solid transparent; padding:2px 0;}
+  .verify-row a:hover, .verify-row a:focus-visible{border-bottom-color:var(--verify); outline:none;}
+  .verify-row a:focus-visible{outline:2px solid var(--verify); outline-offset:2px; border-radius:2px;}
+
+  footer{margin-top:36px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">NEFL Screener · v1 · Personal use</div>
+    <h1>Founder-led + network-effect stocks</h1>
+    <div class="sub">Real global companies, backtested from IPO to today. Every number here — IPO price, current price, index comparison — links to where I got it, so you can check it yourself before trusting it.</div>
+  </header>
+
+  <div class="banner">
+    <b>How to validate this:</b> click "Verify" on each card. Stock prices move constantly, so treat the numbers below as accurate as of early August 2026, not real-time. The S&P 500 comparison uses approximate historical index levels — for exact figures, check a source like macrotrends.net or stockanalysis.com directly.
+  </div>
+
+  <!-- Card: Sea Limited -->
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">Sea Limited (Shopee / Garena)</div>
+        <div class="ticker">NYSE: SE</div>
+      </div>
+      <div class="flag high">Founder-CEO tier</div>
+      <div class="meta"><strong>HQ:</strong> Singapore · <strong>Founder:</strong> Forrest Li — still Chairman &amp; CEO since founding in 2009 · <strong>Network effect:</strong> Shopee's marketplace (more buyers draw more sellers, and vice versa) plus Garena's gaming community effects</div>
+      <div class="read">Li has held the Chairman + CEO role continuously since Sea's founding, with no succession announced as of early 2026 — this is the cleanest "founder-led" case of the two companies here.</div>
+    </div>
+    <div class="backtest">
+      <div class="backtest-title">$100 invested at IPO (Oct 20, 2017 · $15/share) vs. S&P 500</div>
+      <div class="bt-row">
+        <div class="bt-label">SE</div>
+        <div class="bt-track"><div class="bt-fill stock" style="width:100%"></div></div>
+        <div class="bt-value">~$712</div>
+      </div>
+      <div class="bt-row">
+        <div class="bt-label">S&P 500</div>
+        <div class="bt-track"><div class="bt-fill index" style="width:41%"></div></div>
+        <div class="bt-value">~$295</div>
+      </div>
+      <div class="bt-note">Based on SE at ~$106.74 (early Aug 2026) vs. $15 IPO price; S&P 500 ~7,600 today vs. ~2,575 in Oct 2017. Price appreciation only — dividends not included, which slightly understates the S&P 500 side.</div>
+    </div>
+    <div class="closer-look">
+      <div class="closer-look-title">Why this is worth a closer look</div>
+      <div class="cl-row"><div class="cl-label">Growth trend</div><div class="cl-value">Q1 2026 revenue up 47% year-over-year to $7.1B — Shopee GMV up 30%, the Monee lending arm up 71%, and adjusted EBITDA topped $1B for the first time, a real profitability milestone rather than growth-at-any-cost.</div></div>
+      <div class="cl-row"><div class="cl-label">Analyst range</div><div class="cl-value">Targets currently span roughly $100 (TD Cowen, Hold) to $163 (JPMorgan, Overweight) — a wide spread, meaning analysts genuinely disagree on how much more room this stock has.</div></div>
+      <div class="bull-bear">
+        <div class="bb-col bull"><div class="bb-title">Bull case</div><div class="bb-text">First real EBITDA profitability milestone, all three segments (e-commerce, fintech, gaming) growing together, founder still fully in control with a clear long-term strategy.</div></div>
+        <div class="bb-col bear"><div class="bb-title">Bear case</div><div class="bb-text">Some analysts see the stock as close to fair value already (TD Cowen's target is barely above the current price), and competitive/regulatory pressure in Southeast Asian e-commerce remains a live risk.</div></div>
+      </div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://en.wikipedia.org/wiki/Sea_Ltd" target="_blank" rel="noopener">Company overview</a>
+      <a href="https://www.sea.com/aboutus/leadership/management/ForrestLi" target="_blank" rel="noopener">Founder/CEO status</a>
+      <a href="https://pluang.com/en/asset/usstock/SE/10061" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+
+  <!-- Card: MercadoLibre -->
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">MercadoLibre</div>
+        <div class="ticker">NASDAQ: MELI</div>
+      </div>
+      <div class="flag moderate">Founder-Chair tier — transitioned Jan 2026</div>
+      <div class="meta"><strong>HQ:</strong> Argentina/Uruguay · <strong>Founder:</strong> Marcos Galperin — moved from CEO to Executive Chairman on Jan 1, 2026 · <strong>Network effect:</strong> Latin America's largest marketplace + Mercado Pago fintech ecosystem</div>
+      <div class="read">This is exactly the case the tiered rule exists for: Galperin founded the company in 1999 and ran it as CEO for 26 years, but stepped back to Executive Chairman starting this January. Under the classification rule, that puts MercadoLibre in the <b>Founder-Chair</b> tier — recently transitioned, still holds a board leadership role, retains a significant ownership stake — rather than being silently dropped (strict CEO-only rule) or silently treated the same as an active founder-CEO (loose rule). You see the tier and decide how much weight to give it.</div>
+    </div>
+    <div class="backtest">
+      <div class="backtest-title">$100 invested at IPO (Aug 10, 2007 · $18/share) vs. S&P 500</div>
+      <div class="bt-row">
+        <div class="bt-label">MELI</div>
+        <div class="bt-track"><div class="bt-fill stock" style="width:100%"></div></div>
+        <div class="bt-value">~$10,430</div>
+      </div>
+      <div class="bt-row">
+        <div class="bt-label">S&P 500</div>
+        <div class="bt-track"><div class="bt-fill index" style="width:5%"></div></div>
+        <div class="bt-value">~$523</div>
+      </div>
+      <div class="bt-note">Based on MELI at ~$1,878 (Jul 31, 2026) vs. $18 IPO price; S&P 500 ~7,600 today vs. ~1,453 in Aug 2007 (approximate). This is an extreme outlier case — treat it as illustrative of the model, not a typical expected result.</div>
+    </div>
+    <div class="closer-look">
+      <div class="closer-look-title">Why this is worth a closer look</div>
+      <div class="cl-row"><div class="cl-label">Growth trend</div><div class="cl-value">Q1 2026 revenue up 49% year-over-year to $8.85B — its fastest growth rate since 2022 — driven by a 26% jump in active buyers and 77% growth in Mercado Pago's fintech assets under management.</div></div>
+      <div class="cl-row"><div class="cl-label">Analyst range</div><div class="cl-value">24 analysts currently average a "Buy" rating, with targets spanning roughly $1,876 to $2,875 — even the low end sits near today's price, though several firms have trimmed targets recently on margin concerns.</div></div>
+      <div class="bull-bear">
+        <div class="bb-col bull"><div class="bb-title">Bull case</div><div class="bb-text">Fastest revenue growth in four years, e-commerce penetration in Latin America still under 10% in several countries, fintech arm scaling into a real second growth engine.</div></div>
+        <div class="bb-col bear"><div class="bb-title">Bear case</div><div class="bb-text">Stock down ~31% from its peak as profit margin fell from 8.3% to 4.7% due to heavy shipping/credit investment, plus rising competition from Shopee and Temu entering Latin America.</div></div>
+      </div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://en.wikipedia.org/wiki/Marcos_Galperin" target="_blank" rel="noopener">Founder/leadership status</a>
+      <a href="https://stockanalysis.com/stocks/meli/" target="_blank" rel="noopener">IPO date &amp; price</a>
+      <a href="https://www.google.com/finance/beta/quote/MELI:NASDAQ" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+
+  <footer>
+    <b>This is v1, built manually today —</b> two companies, pulled and checked by hand via live search, not an automated feed or a full 500+ stock universe like Chris Koerner's original. A real running version would pull tickers, ownership status, and prices on a schedule and re-check founder-tier status automatically (Founder-CEO / Founder-Chair / Founder-departed), catching transitions like MercadoLibre's the moment they happen rather than relying on you or me noticing. The S&P 500 comparison figures are approximate — verify precisely before relying on them for anything real. Nothing here is investment advice.
+  </footer>
+
+</div>
+</body>
+</html>

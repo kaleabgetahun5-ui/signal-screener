@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal Screener</title>
+<style>
+
+  @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#EDF1F0; --card:#FFFFFF; --ink:#16233D; --ink-soft:#4A5568; --line:#D8DEDC;
+    --high:#1F7A5C; --high-bg:#E5F3EC;
+    --moderate:#B8862B; --moderate-bg:#FBF1DE;
+    --early:#5B6B7A; --early-bg:#E9EDF0;
+    --verify:#9C6B1F;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
+  .wrap{max-width:780px; margin:0 auto;}
+  header{margin-bottom:36px;}
+  .eyebrow{font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:10px;}
+  h1{font-family:'Source Serif 4', serif; font-weight:700; font-size:34px; margin:0 0 10px; letter-spacing:-0.01em;}
+  h2.section-title{font-family:'Source Serif 4', serif; font-weight:600; font-size:22px; margin:44px 0 18px;}
+  .sub{color:var(--ink-soft); font-size:15px; line-height:1.55; max-width:62ch;}
+
+  .banner{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--verify); border-radius:6px; padding:16px 18px; margin:24px 0 12px; font-size:14px; line-height:1.6; color:var(--ink-soft);}
+  .banner b{color:var(--ink);}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:20px; overflow:hidden;}
+  .card.with-tab{display:flex;}
+  .tab{width:6px; flex-shrink:0;}
+  .tab.high{background:var(--high);} .tab.moderate{background:var(--moderate);} .tab.early{background:var(--early);}
+  .body{padding:20px 22px; flex:1; min-width:0;}
+  .card-head{padding:20px 22px 0;}
+
+  .top-row{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:6px;}
+  .drug-name, .company-name{font-family:'Source Serif 4', serif; font-weight:600; font-size:19px;}
+  .ticker{font-family:'IBM Plex Mono', monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:3px 8px; color:var(--ink-soft); white-space:nowrap;}
+  .ticker.unverified{border-style:dashed; color:var(--verify);}
+
+  .meta{font-size:13px; color:var(--ink-soft); margin-bottom:14px; line-height:1.6;}
+  .meta strong{color:var(--ink); font-weight:500;}
+
+  .flag{display:inline-block; font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.03em; text-transform:uppercase; padding:3px 9px; border-radius:20px; margin-bottom:12px;}
+  .flag.high{background:var(--high-bg); color:var(--high);}
+  .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
+  .flag.early{background:var(--early-bg); color:var(--early);}
+
+  .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:16px;}
+
+  .verify-row{border-top:1px dashed var(--line); padding-top:12px; margin:0 22px 20px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .card.with-tab .verify-row{margin:0; padding:12px 22px; border-top:1px dashed var(--line);}
+  .verify-label{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-right:2px;}
+  .verify-row a{font-size:12.5px; color:var(--verify); text-decoration:none; border-bottom:1px solid transparent; padding:2px 0;}
+  .verify-row a:hover, .verify-row a:focus-visible{border-bottom-color:var(--verify); outline:none;}
+  .verify-row a:focus-visible{outline:2px solid var(--verify); outline-offset:2px; border-radius:2px;}
+  .verify-note{font-size:12.5px; color:var(--verify); font-style:italic;}
+
+  footer{margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Signal Screener · Live pipeline snapshot · 2026-08-12</div>
+    <h1>Biotech signals &amp; founder-led companies</h1>
+    <div class="sub">FDA Breakthrough Therapy and EMA PRIME designations, plus a founder-led/network-effect stock screener, both pulled from real sources (SEC EDGAR, ClinicalTrials.gov, FDA/EMA) and summarized by Claude. Every card links to where the fact came from.</div>
+  </header>
+
+  <div class="banner">
+    <b>How to validate this:</b> click "Verify" on each card — it goes straight to the source filing or trial record, not a paraphrase of one. Cards marked with a dashed, amber ticker failed independent verification (a second source didn't confirm the match) and are shown as-is rather than silently dropped or silently trusted. Nothing on this page is investment advice — confidence flags describe clinical/ownership facts, not buy or sell recommendations.
+  </div>
+
+  <h2 class="section-title">Biotech signals</h2>
+  
+  <div class="card with-tab">
+    <div class="tab high"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Exagamglogene autotemcel (Casgevy) (Vertex Pharmaceuticals)</div>
+        <div class="ticker">VRTX</div>
+      </div>
+      <div class="meta"><strong>EMA PRIME</strong> · granted 2023-01-01 · Severe sickle cell disease and transfusion-dependent beta thalassemia</div>
+      <div class="flag high">High signal</div>
+      <div class="read">Exagamglogene autotemcel (Casgevy) is a one-time cell therapy that modifies a patient&#x27;s own blood stem cells to address the underlying genetic defects causing severe sickle cell disease and transfusion-dependent beta thalassemia. The PRIME designation from European regulators signals that this represents a potential major therapeutic advance for patients with these serious inherited blood disorders who currently face lifelong complications and treatment burdens. Unlike existing treatments that manage symptoms through chronic transfusions, pain management, or daily oral medications, this appears to be a gene-editing approach offering potential functional cure with a single treatment, fundamentally different from standard care.</div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://clinicaltrials.gov/study/NCT03745287" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03745287)</a><a href="https://finance.yahoo.com/quote/VRTX" target="_blank" rel="noopener">Current price</a>
+      </div>
+    </div>
+  </div>
+  <div class="card with-tab">
+    <div class="tab moderate"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Tovorafenib (Ojemda) (Day One Biopharmaceuticals)</div>
+        <div class="ticker unverified">UNVERIFIED::DAY-ONE-BIOPHARMACEUTICALS</div>
+      </div>
+      <div class="meta"><strong>FDA Breakthrough Therapy</strong> · granted 2022-08-15 · Relapsed or progressive pediatric low-grade glioma</div>
+      <div class="flag moderate">Moderate signal</div>
+      <div class="read">Tovorafenib (Ojemda) is being developed to treat children with low-grade gliomas (slow-growing brain tumors) that have come back or continued to grow despite previous treatment. The FDA&#x27;s Breakthrough Therapy designation indicates that early evidence suggests this drug may offer a substantial improvement over existing options for these pediatric patients who currently have limited treatment choices. Pediatric low-grade glioma has historically relied on chemotherapy and surgery, with few targeted therapies approved specifically for children, making novel mechanisms potentially meaningful for patients who progress on standard approaches.</div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://clinicaltrials.gov/study/NCT04775485" target="_blank" rel="noopener">ClinicalTrials.gov (NCT04775485)</a><span class="verify-note">ticker not independently verified</span>
+      </div>
+    </div>
+  </div>
+  <div class="card with-tab">
+    <div class="tab high"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Exagamglogene autotemcel (Casgevy) (Vertex Pharmaceuticals)</div>
+        <div class="ticker">VRTX</div>
+      </div>
+      <div class="meta"><strong>FDA Breakthrough Therapy</strong> · granted 2021-01-28 · Severe sickle cell disease</div>
+      <div class="flag high">High signal</div>
+      <div class="read">Exagamglogene autotemcel (Casgevy) is a one-time gene therapy treatment for severe sickle cell disease that modifies a patient&#x27;s own blood stem cells to produce healthy hemoglobin and reduce painful vaso-occlusive crises. The Breakthrough Therapy designation indicates FDA recognition that this therapy addresses a serious unmet need in patients who currently face lifelong complications, frequent hospitalizations, and shortened life expectancy from severe sickle cell disease. Unlike traditional treatments that manage symptoms through chronic blood transfusions, hydroxyurea, or pain medications, this gene therapy offers a potential functional cure by addressing the underlying genetic defect with a single treatment rather than requiring lifelong daily or monthly interventions.</div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://clinicaltrials.gov/study/NCT03745287" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03745287)</a><a href="https://finance.yahoo.com/quote/VRTX" target="_blank" rel="noopener">Current price</a>
+      </div>
+    </div>
+  </div>
+  <div class="card with-tab">
+    <div class="tab high"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Lecanemab (Leqembi) (Eisai)</div>
+        <div class="ticker unverified">HSAI</div>
+      </div>
+      <div class="meta"><strong>FDA Breakthrough Therapy</strong> · granted 2019-06-17 · Early Alzheimer&#x27;s disease</div>
+      <div class="flag high">High signal</div>
+      <div class="read">Lecanemab is a treatment for early Alzheimer&#x27;s disease that received Breakthrough Therapy designation from the FDA, meaning it showed substantial improvement over existing therapies in treating a serious condition during early clinical testing. This designation matters clinically because it suggests the drug demonstrated meaningful slowing of cognitive decline in patients during the earliest symptomatic stages of Alzheimer&#x27;s, when intervention may preserve more brain function. Lecanemab is one of the first disease-modifying therapies to demonstrate measurable slowing of Alzheimer&#x27;s progression in clinical trials, representing a significant advance over prior treatments that only managed symptoms without affecting underlying disease course.</div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://clinicaltrials.gov/study/NCT03887455" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03887455)</a><span class="verify-note">ticker not independently verified</span>
+      </div>
+    </div>
+  </div>
+  <div class="card with-tab">
+    <div class="tab high"></div>
+    <div class="body">
+      <div class="top-row">
+        <div class="drug-name">Tabelecleucel (Ebvallo) (Atara Biotherapeutics)</div>
+        <div class="ticker">ATRA</div>
+      </div>
+      <div class="meta"><strong>EMA PRIME</strong> · granted 2016-10-01 · Epstein-Barr virus-positive post-transplant lymphoproliferative disease (EBV+ PTLD)</div>
+      <div class="flag high">High signal</div>
+      <div class="read">Tabelecleucel is a cell therapy designed to treat a dangerous cancer called post-transplant lymphoproliferative disease, which occurs when Epstein-Barr virus causes uncontrolled growth of immune cells in organ transplant recipients. The PRIME designation from European regulators indicates this addresses a critical unmet medical need where current treatment options are limited and often ineffective. This represents a targeted immunotherapy approach for EBV+ PTLD, a condition where standard chemotherapy has poor outcomes and often cannot be used due to transplant patients&#x27; already weakened immune systems, making this potentially the first therapy specifically designed for this patient population.</div>
+      <div class="verify-row">
+        <span class="verify-label">Verify:</span>
+        <a href="https://clinicaltrials.gov/study/NCT03394365" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03394365)</a><a href="https://finance.yahoo.com/quote/ATRA" target="_blank" rel="noopener">Current price</a>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Founder-led companies</h2>
+  
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">Coupang, Inc.</div>
+        <div class="ticker">NYSE: CPNG</div>
+      </div>
+      <div class="flag high">Founder-CEO tier</div>
+      <div class="meta"><strong>HQ:</strong> South Korea · <strong>Founder:</strong> Bom Kim · <strong>Network effect:</strong> More customers attract more third-party sellers to the platform, which increases product selection and competitive pricing, making the marketplace more valuable to customers (two-sided marketplace network effect)</div>
+      <div class="read">Chief Executive Officer and Chairman of the Board Ownership stake: 74.3% (as of 2026-04-27).</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://www.sec.gov/Archives/edgar/data/1834584/000114036126017102/ny20063059x1_def14a.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/CPNG" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">Grab Holdings Ltd</div>
+        <div class="ticker">Nasdaq: GRAB</div>
+      </div>
+      <div class="flag high">Founder-CEO tier</div>
+      <div class="meta"><strong>HQ:</strong> Singapore · <strong>Founder:</strong> Anthony Tan · <strong>Network effect:</strong> More drivers attract more riders due to shorter wait times, while more riders attract more drivers due to higher earning opportunities, creating a two-sided marketplace network effect.</div>
+      <div class="read">Founder, Chairman and Chief Executive Officer Ownership stake: 3.2% (as of 2026-03-06).</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://www.sec.gov/Archives/edgar/data/1855612/000185561226000020/ck0001855612-20251231.htm" target="_blank" rel="noopener">SEC 20-F filing</a><a href="https://finance.yahoo.com/quote/GRAB" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">Sea Ltd</div>
+        <div class="ticker">NYSE: SE</div>
+      </div>
+      <div class="flag high">Founder-CEO tier</div>
+      <div class="meta"><strong>HQ:</strong> Singapore · <strong>Founder:</strong> Forrest Li · <strong>Network effect:</strong> Sea Limited operates a multi-sided platform ecosystem where more buyers attract more sellers on Shopee (e-commerce), more gamers increase engagement and attract additional players on Garena (gaming), and cross-platform synergies amplify user value across its digital entertainment, e-commerce, and financial services businesses.</div>
+      <div class="read">Founder and Chief Executive Officer, Chairman of Sea Limited Ownership stake: 16.0% (as of 2026-04-17).</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://www.sec.gov/Archives/edgar/data/1703399/000114036126015366/ef20067274_20f.htm" target="_blank" rel="noopener">SEC 20-F filing</a><a href="https://finance.yahoo.com/quote/SE" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">MERCADOLIBRE INC</div>
+        <div class="ticker">Nasdaq: MELI</div>
+      </div>
+      <div class="flag moderate">Founder-Chair tier</div>
+      <div class="meta"><strong>HQ:</strong> Uruguay · <strong>Founder:</strong> Marcos Galperin · <strong>Network effect:</strong> More buyers attract more sellers and vice versa, creating a two-sided marketplace where increased participants on each side increase value for the other side.</div>
+      <div class="read">Executive Chairman of the Board Ownership stake: 7.0% (as of 2026-04-23).</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://www.sec.gov/Archives/edgar/data/1099590/000109959026000010/meli-20260423.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/MELI" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">PDD Holdings Inc.</div>
+        <div class="ticker unverified">Nasdaq: PDD</div>
+      </div>
+      <div class="flag early">Founder-departed</div>
+      <div class="meta"><strong>HQ:</strong> China · <strong>Founder:</strong> Colin Huang · <strong>Network effect:</strong> More merchants attract more buyers through lower prices from bulk purchasing, while more buyers attract more merchants seeking larger customer base, creating a two-sided marketplace network effect.</div>
+      <div class="read">No active leadership role Ownership stake: 24.8% (as of 2026-04-29).</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://www.sec.gov/Archives/edgar/data/1737806/000110465926050727/pdd-20251231x20f.htm" target="_blank" rel="noopener">SEC 20-F filing</a><span class="verify-note">ticker not independently verified</span>
+    </div>
+  </div>
+
+  <footer>
+    <b>Generated 2026-08-12</b> from a live pipeline (not a live feed on this page — it's a static snapshot, rebuilt on demand). Ticker matching, verification, and classification methodology: <a href="https://github.com/kaleabgetahun5-ui/signal-screener" target="_blank" rel="noopener" style="color:var(--verify);">source on GitHub</a>. This omits the "why this is worth a closer look" growth/analyst/bull-bear section from earlier mockups — that needs a real growth-data and analyst-target source this pipeline doesn't pull yet, and this project doesn't fabricate that kind of content.
+  </footer>
+
+</div>
+</body>
+</html>
