@@ -1,10 +1,12 @@
 name: Weekly pipeline
 
 on:
-  schedule:
-    # Mondays 13:00 UTC. Cron uses UTC regardless of runner locale — adjust
-    # here if you want the digest to land at a different local time.
-    - cron: "0 13 * * 1"
+  # Scheduled run disabled for now — manual trigger only (Actions tab ->
+  # Weekly pipeline -> Run workflow). To go back to a weekly schedule,
+  # uncomment the block below (Mondays 13:00 UTC; cron is always UTC
+  # regardless of runner locale).
+  # schedule:
+  #   - cron: "0 13 * * 1"
   workflow_dispatch: {}
 
 permissions:
