@@ -14,6 +14,10 @@ class RawDesignation:
     trial_id: str | None
     data_source: str  # where this record came from, e.g. a URL or "manual_seed"
     data_as_of_date: str  # ISO date this record was pulled/curated
+    # Citation for date_granted specifically (a URL/filing, not just "manual
+    # seed") — sources/ema_prime.py requires and validates this per row;
+    # None for sources (e.g. FDA) that don't yet enforce it.
+    date_granted_source: str | None = None
 
 
 @dataclass
@@ -30,7 +34,15 @@ class Company:
     ticker_verified: bool = False
     ticker_verification_source: str | None = None
     ticker_verification_date: str | None = None
+    ticker_verification_reason: str | None = None
     ticker_match_confidence: float | None = None
+    # Brief section 4's "listing status changed" case, distinct from a
+    # plain unverified match — see matching/ticker_verify.py's
+    # check_delisted_or_acquired(). True means this company was very likely
+    # matched correctly but is no longer an active, tradable listing
+    # (acquired, delisted, gone private) — surfaced distinctly on the site
+    # and in the digest rather than lumped in with "couldn't verify this."
+    delisted_or_acquired: bool = False
     founder_name: str | None = None
     network_effect: str | None = None
     founder_tier_source: str | None = None  # e.g. SEC filing URL/accession used
@@ -63,6 +75,7 @@ class Designation:
     summary_text: str | None = None
     summary_confidence_flag: str | None = None
     summary_generated_at: str | None = None
+    date_granted_source: str | None = None  # see RawDesignation
 
 
 @dataclass

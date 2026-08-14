@@ -20,6 +20,13 @@ SEC_USER_AGENT = os.environ.get(
     "SEC_USER_AGENT", "signal-screener contact@example.com"
 )
 
+# Fallback ticker-matching source for companies not in SEC's US-filer list
+# (matching/ticker_match.py) — mainly non-US EMA-designated companies. Free
+# key, sign up at https://www.openfigi.com/user/signup. Works without a key
+# too, just at a much lower rate limit (5 req/min search vs 20 req/min), so
+# this is optional but recommended.
+OPENFIGI_API_KEY = os.environ.get("OPENFIGI_API_KEY")
+
 ALLOWED_CONFIDENCE_FLAGS = ("High signal", "Moderate signal", "Early stage")
 
 # Weekly email digest (MVP roadmap step 4). SMTP rather than a provider API

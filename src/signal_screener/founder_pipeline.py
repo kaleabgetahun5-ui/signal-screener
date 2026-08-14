@@ -17,6 +17,7 @@ Runs the founder-led subset of the project brief's pipeline (section 4):
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from signal_screener import db
@@ -25,8 +26,8 @@ from signal_screener.filings.sec_edgar import (
     fetch_filing_text,
     get_latest_annual_filing,
 )
-from signal_screener.matching.ticker_match import match_company_to_ticker, placeholder_ticker
-from signal_screener.matching.ticker_verify import verify_ticker
+from signal_screener.matching.resolve import resolve_ticker
+from signal_screener.matching.ticker_match import placeholder_ticker
 from signal_screener.models import Company, Ownership
 from signal_screener.sources.founder_led_tier1 import TIER1_CANDIDATES
 from signal_screener.summarize.founder_extraction import extract_founder_status
@@ -37,6 +38,32 @@ logger = logging.getLogger(__name__)
 # more than this many months ago is reclassified "Founder-departed" — the
 # tier is meant to capture a recent handoff, not an indefinite arrangement.
 FOUNDER_CHAIR_RECENCY_MONTHS = 24
+
+
+@dataclass
+class RunSummary:
+    """Item 6, failure visibility — see pipeline.RunSummary for the twin
+    of this on the biotech side."""
+
+    processed_tickers: list[str]
+    unverified_tickers: int = 0
+    filing_lookup_failures: int = 0
+    extraction_failures: int = 0
+    # Not a failure — see pipeline.RunSummary.delisted_or_acquired.
+    delisted_or_acquired: int = 0
+
+    @property
+    def failure_count(self) -> int:
+        return self.unverified_tickers + self.filing_lookup_failures + self.extraction_failures
+
+    def one_line(self) -> str:
+        return (
+            f"{len(self.processed_tickers)} processed, {self.failure_count} failure(s): "
+            f"{self.unverified_tickers} unverified ticker(s), "
+            f"{self.filing_lookup_failures} filing lookup failure(s), "
+            f"{self.extraction_failures} founder extraction failure(s) "
+            f"| {self.delisted_or_acquired} delisted/acquired (not a failure)"
+        )
 
 
 def _months_since(iso_date: str) -> float | None:
@@ -62,14 +89,16 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
     return founder_tier, None
 
 
-def run() -> list[str]:
-    """Runs the founder-led pipeline once. Returns tickers processed."""
+def run() -> RunSummary:
+    """Runs the founder-led pipeline once. Returns a RunSummary (processed
+    tickers plus failure counts — see RunSummary.one_line())."""
     db.init_db()
     processed = []
+    run_summary = RunSummary(processed_tickers=processed)
 
     with db.connect() as conn:
         for candidate in TIER1_CANDIDATES:
-            match = match_company_to_ticker(candidate.company_name)
+            match, verification = resolve_ticker(candidate.company_name)
             if match is None:
                 logger.warning("No ticker match for company_name=%r", candidate.company_name)
                 ticker = placeholder_ticker(candidate.company_name)
@@ -88,9 +117,43 @@ def run() -> list[str]:
                     ),
                 )
                 processed.append(ticker)
+                run_summary.unverified_tickers += 1
                 continue
 
-            verification = verify_ticker(match.ticker, candidate.company_name)
+            if verification.delisted_or_acquired:
+                # Terminal state for this screener's purpose — a delisted/
+                # acquired company isn't a founder-led investment candidate
+                # anymore, so there's no point spending a filing lookup +
+                # Claude extraction call classifying its founder tier. Kept
+                # visible (never silently dropped) with founder_tier "N/A"
+                # and the delisted/acquired flag, same as pipeline.py.
+                logger.warning(
+                    "%s (%s) is delisted/acquired: %s",
+                    match.ticker,
+                    candidate.company_name,
+                    verification.reason,
+                )
+                db.upsert_company(
+                    conn,
+                    Company(
+                        ticker=match.ticker,
+                        company_name=match.matched_company_name,
+                        country=candidate.country,
+                        founder_tier="N/A",
+                        listing_type="ADR",
+                        ticker_verified=False,
+                        ticker_verification_source=verification.source,
+                        ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
+                        ticker_match_confidence=match.confidence,
+                        founder_name=candidate.founder_name,
+                        delisted_or_acquired=True,
+                    ),
+                )
+                processed.append(match.ticker)
+                run_summary.delisted_or_acquired += 1
+                continue
+
             if not verification.verified:
                 logger.warning(
                     "Ticker verification failed for %s (%s): %s",
@@ -98,6 +161,7 @@ def run() -> list[str]:
                     candidate.company_name,
                     verification.reason,
                 )
+                run_summary.unverified_tickers += 1
 
             filing = get_latest_annual_filing(match.ticker)
             if filing is None:
@@ -111,11 +175,13 @@ def run() -> list[str]:
                     ticker_verified=verification.verified,
                     ticker_verification_source=verification.source,
                     ticker_verification_date=verification.checked_date,
+                    ticker_verification_reason=verification.reason,
                     ticker_match_confidence=match.confidence,
                     founder_name=candidate.founder_name,
                 )
                 db.upsert_company(conn, company)
                 processed.append(match.ticker)
+                run_summary.filing_lookup_failures += 1
                 continue
 
             text = fetch_filing_text(filing.document_url)
@@ -138,6 +204,7 @@ def run() -> list[str]:
                         ticker_verified=verification.verified,
                         ticker_verification_source=verification.source,
                         ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
                         ticker_match_confidence=match.confidence,
                         founder_name=candidate.founder_name,
                         founder_tier_source=f"{filing.form}:{filing.document_url}",
@@ -147,6 +214,7 @@ def run() -> list[str]:
                     ),
                 )
                 processed.append(match.ticker)
+                run_summary.extraction_failures += 1
                 continue
 
             final_tier, override_reason = _apply_recency_rule(
@@ -164,6 +232,7 @@ def run() -> list[str]:
                 ticker_verified=verification.verified,
                 ticker_verification_source=verification.source,
                 ticker_verification_date=verification.checked_date,
+                ticker_verification_reason=verification.reason,
                 ticker_match_confidence=match.confidence,
                 founder_name=candidate.founder_name,
                 network_effect=extraction.network_effect,
@@ -188,4 +257,4 @@ def run() -> list[str]:
 
             processed.append(match.ticker)
 
-    return processed
+    return run_summary

@@ -5,6 +5,17 @@ Brief note (project brief, pipeline step 2): "fuzzy matching — expect manual
 curation early on." This module returns its best guess plus a confidence
 score; it never claims certainty. ticker_verify.py is the mandatory
 second-source check that runs on every match before it's trusted.
+
+SEC's company_tickers.json only covers US-registered filers, which misses
+two real categories found in production: non-US companies with no US-
+registered ticker (e.g. Eisai — its real ADR ESAIY trades OTC and isn't in
+this file at all, so the fuzzy matcher was scoring against unrelated SEC
+names and landed on "Hesai Group"/HSAI, a coincidental near-anagram), and
+companies recently delisted/acquired (e.g. Day One Biopharmaceuticals/DAWN,
+acquired by Servier in 2026 — SEC drops a filer from this file once it's no
+longer an active registrant, even though the designation being processed
+predates the acquisition). match_company_to_ticker_openfigi() below is the
+fallback for both cases; matching/resolve.py decides when to use it.
 """
 
 import re
@@ -13,9 +24,16 @@ from dataclasses import dataclass
 import requests
 from rapidfuzz import fuzz, process, utils
 
-from signal_screener.config import SEC_USER_AGENT
+from signal_screener.config import OPENFIGI_API_KEY, SEC_USER_AGENT
 
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+OPENFIGI_SEARCH_URL = "https://api.openfigi.com/v3/search"
+
+# Security types OpenFIGI's search returns that actually represent "a
+# company's stock" rather than a derivative referencing one — options,
+# warrants, and crypto all show up in results for a plain name search and
+# would otherwise dominate/pollute the candidate list.
+_OPENFIGI_EQUITY_SECURITY_TYPES = {"Common Stock", "REIT", "ADR", "Depositary Receipt"}
 
 
 def placeholder_ticker(company_name: str) -> str:
@@ -131,3 +149,75 @@ def match_company_to_ticker(company_name: str) -> TickerMatch | None:
 
     ticker, canonical_name = company_list[matched_name]
     return TickerMatch(ticker=ticker, matched_company_name=canonical_name, confidence=score)
+
+
+def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
+    """Fallback matcher for companies match_company_to_ticker() can't place
+    (not in SEC's US-filer list at all) or placed wrong (matched but failed
+    ticker_verify.py's check) — see module docstring. Uses OpenFIGI's search
+    API, which indexes global listings including OTC ADRs and delisted/
+    acquired securities that SEC's file omits. Best-effort like its SEC
+    counterpart: returns its best guess plus a confidence score, never a
+    claim of certainty — matching/resolve.py still runs this through
+    ticker_verify.py before trusting it.
+    """
+    headers = {"Content-Type": "application/json"}
+    if OPENFIGI_API_KEY:
+        headers["X-OPENFIGI-APIKEY"] = OPENFIGI_API_KEY
+
+    try:
+        resp = requests.post(
+            OPENFIGI_SEARCH_URL,
+            json={"query": company_name},
+            headers=headers,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        candidates = resp.json().get("data", [])
+    except requests.RequestException:
+        return None
+
+    equity_candidates = [
+        c
+        for c in candidates
+        if c.get("marketSector") == "Equity"
+        and c.get("securityType") in _OPENFIGI_EQUITY_SECURITY_TYPES
+        and c.get("ticker")
+        and c.get("name")
+    ]
+    if not equity_candidates:
+        return None
+
+    scored = [
+        (c, fuzz.token_sort_ratio(company_name, c["name"], processor=_normalize_for_matching))
+        for c in equity_candidates
+    ]
+    scored = [(c, score) for c, score in scored if score >= MIN_MATCH_SCORE]
+    if not scored:
+        return None
+
+    # Tie-break toward the primary US listing when the top score is shared —
+    # a foreign issuer's GDR/secondary listing scores identically to its US
+    # ADR on name alone (confirmed against real data: "Eisai" search returns
+    # 70+ equally-scored "EISAI CO LTD" listings across a dozen exchanges).
+    # Shortest-ticker alone isn't a safe tie-break here — unlike the SEC
+    # warrant-vs-common-stock case this comment used to reference, OpenFIGI's
+    # results span many exchanges, and a short non-US listing code (e.g.
+    # "EII" on exchCode "LU") can be shorter than the real US ADR ticker
+    # ("ESAIY") it should lose to. Prefer exchCode "US" and the primary/
+    # composite record (compositeFIGI == figi) first — the two downstream
+    # verification sources (Yahoo, SEC EDGAR) are both US-centric, so a
+    # non-US listing can never actually get verified even when it's the
+    # right company.
+    best_score = max(score for _, score in scored)
+    best_candidates = [c for c, score in scored if score == best_score]
+
+    def _listing_priority(c: dict) -> tuple[int, int]:
+        is_us = c.get("exchCode") == "US"
+        is_composite = c.get("compositeFIGI") == c.get("figi")
+        rank = 0 if (is_us and is_composite) else 1 if is_us else 2 if is_composite else 3
+        return (rank, len(c["ticker"]))
+
+    best = min(best_candidates, key=_listing_priority)
+
+    return TickerMatch(ticker=best["ticker"], matched_company_name=best["name"], confidence=best_score)

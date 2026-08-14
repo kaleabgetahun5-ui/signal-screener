@@ -17,11 +17,12 @@ interface (see sources/fda_breakthrough.py and sources/ema_prime.py), so steps
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import date
 
 from signal_screener import db
-from signal_screener.matching.ticker_match import match_company_to_ticker, placeholder_ticker
-from signal_screener.matching.ticker_verify import verify_ticker
+from signal_screener.matching.resolve import resolve_ticker
+from signal_screener.matching.ticker_match import placeholder_ticker
 from signal_screener.models import Company, Designation
 from signal_screener.sources import ema_prime, fda_breakthrough
 from signal_screener.summarize.claude_summary import summarize_designation
@@ -30,6 +31,38 @@ from signal_screener.trials.clinicaltrials import fetch_trial
 logger = logging.getLogger(__name__)
 
 SOURCES = [fda_breakthrough, ema_prime]
+
+
+@dataclass
+class RunSummary:
+    """Item 6, failure visibility: every run reports what actually went
+    wrong, in one line, instead of failures only being visible by reading
+    logs. Surfaced by the CLI (cli.py) and folded into the weekly digest
+    (digest.py) so a bad run doesn't go unnoticed until someone happens to
+    read a designation's card and see it's unverified."""
+
+    processed_ids: list[str]
+    unverified_tickers: int = 0
+    trial_lookup_failures: int = 0
+    summarization_failures: int = 0
+    # Not a failure — a confirmed real-world status change (brief section
+    # 4). Tracked and reported, but deliberately excluded from
+    # failure_count: counting it as one would misrepresent a correctly-
+    # detected acquisition/delisting as something the pipeline got wrong.
+    delisted_or_acquired: int = 0
+
+    @property
+    def failure_count(self) -> int:
+        return self.unverified_tickers + self.trial_lookup_failures + self.summarization_failures
+
+    def one_line(self) -> str:
+        return (
+            f"{len(self.processed_ids)} processed, {self.failure_count} failure(s): "
+            f"{self.unverified_tickers} unverified ticker(s), "
+            f"{self.trial_lookup_failures} trial lookup failure(s), "
+            f"{self.summarization_failures} summarization failure(s) "
+            f"| {self.delisted_or_acquired} delisted/acquired (not a failure)"
+        )
 
 
 def _designation_id(raw) -> str:
@@ -41,7 +74,7 @@ def _resolve_company(raw) -> Company:
     """Steps 2 + 3: match then mandatorily verify. Always returns a Company
     row — an unmatched or failed-verification entry is still recorded, just
     flagged unverified, per the brief's "never silently dropped" rule."""
-    match = match_company_to_ticker(raw.company_name)
+    match, verification = resolve_ticker(raw.company_name)
 
     if match is None:
         logger.warning("No ticker match for company_name=%r", raw.company_name)
@@ -54,8 +87,11 @@ def _resolve_company(raw) -> Company:
             ticker_match_confidence=None,
         )
 
-    verification = verify_ticker(match.ticker, raw.company_name)
-    if not verification.verified:
+    if verification.delisted_or_acquired:
+        logger.warning(
+            "%s (%s) is delisted/acquired: %s", match.ticker, raw.company_name, verification.reason
+        )
+    elif not verification.verified:
         logger.warning(
             "Ticker verification failed for %s (%s): %s",
             match.ticker,
@@ -69,12 +105,15 @@ def _resolve_company(raw) -> Company:
         ticker_verified=verification.verified,
         ticker_verification_source=verification.source,
         ticker_verification_date=verification.checked_date,
+        ticker_verification_reason=verification.reason,
         ticker_match_confidence=match.confidence,
+        delisted_or_acquired=verification.delisted_or_acquired,
     )
 
 
-def run(*, generate_summaries: bool = True) -> list[str]:
-    """Runs the pipeline once. Returns the list of designation_ids processed."""
+def run(*, generate_summaries: bool = True) -> RunSummary:
+    """Runs the pipeline once. Returns a RunSummary (processed designation_ids
+    plus failure counts — see RunSummary.one_line())."""
     db.init_db()
     raw_designations = []
     for source in SOURCES:
@@ -85,10 +124,15 @@ def run(*, generate_summaries: bool = True) -> list[str]:
         raw_designations.extend(source_designations)
 
     processed_ids = []
+    run_summary = RunSummary(processed_ids=processed_ids)
     with db.connect() as conn:
         for raw in raw_designations:
             company = _resolve_company(raw)
             db.upsert_company(conn, company)
+            if company.delisted_or_acquired:
+                run_summary.delisted_or_acquired += 1
+            elif not company.ticker_verified:
+                run_summary.unverified_tickers += 1
 
             trial = None
             if raw.trial_id:
@@ -96,6 +140,7 @@ def run(*, generate_summaries: bool = True) -> list[str]:
                     trial = fetch_trial(raw.trial_id)
                 except Exception:
                     logger.exception("Trial lookup failed for %s", raw.trial_id)
+                    run_summary.trial_lookup_failures += 1
                 if trial:
                     db.upsert_trial(conn, trial)
                 else:
@@ -114,6 +159,7 @@ def run(*, generate_summaries: bool = True) -> list[str]:
                 data_source=raw.data_source,
                 data_as_of_date=raw.data_as_of_date,
                 raw_company_name=raw.company_name,
+                date_granted_source=raw.date_granted_source,
             )
 
             if generate_summaries:
@@ -135,8 +181,9 @@ def run(*, generate_summaries: bool = True) -> list[str]:
                     logger.exception(
                         "Summarization failed for designation_id=%s", designation_id
                     )
+                    run_summary.summarization_failures += 1
 
             db.upsert_designation(conn, designation)
             processed_ids.append(designation_id)
 
-    return processed_ids
+    return run_summary

@@ -31,6 +31,7 @@ REQUIRED_COLUMNS = {
     "drug_name",
     "company_name",
     "date_granted",
+    "date_granted_source",
     "indication",
     "trial_id",
     "data_as_of_date",
@@ -57,7 +58,16 @@ def fetch_new_designations() -> list[RawDesignation]:
         if missing:
             raise ValueError(f"Seed file missing required columns: {missing}")
 
-        for row in reader:
+        for i, row in enumerate(reader, start=2):  # start=2: header is row 1
+            date_granted_source = (row.get("date_granted_source") or "").strip()
+            if not date_granted_source:
+                raise ValueError(
+                    f"{SEED_FILE.name} row {i} ({row.get('drug_name', '?')!r}): "
+                    "date_granted_source is required — cite where date_granted "
+                    "came from (a PRIME-grant press release or EMA document "
+                    "URL), not left blank or guessed."
+                )
+
             designations.append(
                 RawDesignation(
                     source="EMA",
@@ -69,6 +79,7 @@ def fetch_new_designations() -> list[RawDesignation]:
                     trial_id=(row.get("trial_id") or "").strip() or None,
                     data_source=f"manual_seed:{SEED_FILE.name}",
                     data_as_of_date=row["data_as_of_date"].strip(),
+                    date_granted_source=date_granted_source,
                 )
             )
     return designations

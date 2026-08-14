@@ -54,6 +54,7 @@ CSS = """
     --moderate:#B8862B; --moderate-bg:#FBF1DE;
     --early:#5B6B7A; --early-bg:#E9EDF0;
     --verify:#9C6B1F;
+    --delisted:#5B3A8E; --delisted-bg:#EEE7F7;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
@@ -70,7 +71,7 @@ CSS = """
   .card{background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:20px; overflow:hidden;}
   .card.with-tab{display:flex;}
   .tab{width:6px; flex-shrink:0;}
-  .tab.high{background:var(--high);} .tab.moderate{background:var(--moderate);} .tab.early{background:var(--early);}
+  .tab.high{background:var(--high);} .tab.moderate{background:var(--moderate);} .tab.early{background:var(--early);} .tab.delisted{background:var(--delisted);}
   .body{padding:20px 22px; flex:1; min-width:0;}
   .card-head{padding:20px 22px 0;}
 
@@ -78,6 +79,7 @@ CSS = """
   .drug-name, .company-name{font-family:'Source Serif 4', serif; font-weight:600; font-size:19px;}
   .ticker{font-family:'IBM Plex Mono', monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:3px 8px; color:var(--ink-soft); white-space:nowrap;}
   .ticker.unverified{border-style:dashed; color:var(--verify);}
+  .ticker.delisted{border-style:solid; border-color:var(--delisted); color:var(--delisted); background:var(--delisted-bg);}
 
   .meta{font-size:13px; color:var(--ink-soft); margin-bottom:14px; line-height:1.6;}
   .meta strong{color:var(--ink); font-weight:500;}
@@ -86,6 +88,7 @@ CSS = """
   .flag.high{background:var(--high-bg); color:var(--high);}
   .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
   .flag.early{background:var(--early-bg); color:var(--early);}
+  .flag.delisted{background:var(--delisted-bg); color:var(--delisted);}
 
   .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:16px;}
 
@@ -96,6 +99,8 @@ CSS = """
   .verify-row a:hover, .verify-row a:focus-visible{border-bottom-color:var(--verify); outline:none;}
   .verify-row a:focus-visible{outline:2px solid var(--verify); outline-offset:2px; border-radius:2px;}
   .verify-note{font-size:12.5px; color:var(--verify); font-style:italic;}
+  .delisted-note{font-size:13px; color:var(--delisted); line-height:1.5; margin:0 22px 14px; padding:10px 12px; background:var(--delisted-bg); border-radius:6px;}
+  .card.with-tab .delisted-note{margin:0 22px 14px;}
 
   footer{margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
 """
@@ -109,10 +114,20 @@ def _verify_note() -> str:
     return '<span class="verify-note">ticker not independently verified</span>'
 
 
+def _delisted_note(reason: str | None) -> str:
+    text = reason or "This company appears to no longer be an active, tradable listing."
+    return f'<div class="delisted-note"><strong>Delisted/acquired:</strong> {html.escape(text)}</div>'
+
+
 def _render_biotech_card(row) -> str:
     verified = bool(row["ticker_verified"])
-    ticker_class = "ticker" if verified else "ticker unverified"
+    delisted = bool(row["delisted_or_acquired"])
+    ticker_class = "ticker delisted" if delisted else ("ticker" if verified else "ticker unverified")
     confidence = row["summary_confidence_flag"] or "Early stage"
+    # Delisted/acquired status is about the company's listing, not the
+    # drug's clinical designation — the confidence flag/tab color stays
+    # what it was; delisted status gets its own distinct pill + note below,
+    # not a repurposed one.
     tab_class = CONFIDENCE_CLASS.get(confidence, "early")
 
     company = html.escape(row["raw_company_name"])
@@ -130,14 +145,24 @@ def _render_biotech_card(row) -> str:
             f'<a href="https://clinicaltrials.gov/study/{nct}" target="_blank" '
             f'rel="noopener">ClinicalTrials.gov ({nct})</a>'
         )
+    date_granted_source = row["date_granted_source"]
+    if date_granted_source and date_granted_source.startswith("http"):
+        verify_links.append(
+            f'<a href="{html.escape(date_granted_source)}" target="_blank" '
+            f'rel="noopener">Designation date source</a>'
+        )
     if verified:
         verify_links.append(
             f'<a href="https://finance.yahoo.com/quote/{ticker}" target="_blank" '
             f'rel="noopener">Current price</a>'
         )
     verify_html = "".join(verify_links) if verify_links else ""
-    if not verified:
+    if delisted:
+        verify_html += '<span class="verify-note">no current-price link — see delisted/acquired note above</span>'
+    elif not verified:
         verify_html += _verify_note()
+
+    delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
 
     return f"""
   <div class="card with-tab">
@@ -149,7 +174,9 @@ def _render_biotech_card(row) -> str:
       </div>
       <div class="meta"><strong>{source} {designation_type}</strong> · granted {row['date_granted']} · {indication}</div>
       {_flag_pill(confidence, tab_class)}
+      {_flag_pill("Delisted/Acquired", "delisted") if delisted else ""}
       <div class="read">{read_text}</div>
+      {delisted_html}
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         {verify_html}
@@ -160,10 +187,11 @@ def _render_biotech_card(row) -> str:
 
 def _render_founder_card(row, ownership) -> str:
     verified = bool(row["ticker_verified"])
-    ticker_class = "ticker" if verified else "ticker unverified"
+    delisted = bool(row["delisted_or_acquired"])
+    ticker_class = "ticker delisted" if delisted else ("ticker" if verified else "ticker unverified")
     tier = row["founder_tier"]
-    tier_class = TIER_CLASS.get(tier, "early")
-    tier_label = TIER_LABEL.get(tier, tier)
+    tier_class = "delisted" if delisted else TIER_CLASS.get(tier, "early")
+    tier_label = "Delisted/Acquired" if delisted else TIER_LABEL.get(tier, tier)
 
     name = html.escape(row["company_name"])
     ticker = html.escape(row["ticker"])
@@ -171,7 +199,14 @@ def _render_founder_card(row, ownership) -> str:
     country = html.escape(row["country"] or "unknown")
     network_effect = html.escape(row["network_effect"] or "not identified in the source excerpt")
 
-    if ownership:
+    if delisted:
+        # founder_pipeline.py deliberately skips the filing/ownership fetch
+        # for a confirmed delisted/acquired company (nothing left to
+        # classify) — the delisted note below carries the real information
+        # here instead of a "no ownership on file" line that would read as
+        # a data gap rather than a known status.
+        read_text = "This company is no longer an active, tradable listing — see note below."
+    elif ownership:
         pct = (
             f"{ownership['ownership_pct']:.1f}%"
             if ownership["ownership_pct"] is not None
@@ -197,8 +232,12 @@ def _render_founder_card(row, ownership) -> str:
             f'rel="noopener">Current price</a>'
         )
     verify_html = "".join(verify_links) if verify_links else ""
-    if not verified:
+    if delisted:
+        verify_html += '<span class="verify-note">no current-price link — see delisted/acquired note above</span>'
+    elif not verified:
         verify_html += _verify_note()
+
+    delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
 
     ticker_display = f"{exchange}: {ticker}" if exchange else ticker
 
@@ -212,6 +251,7 @@ def _render_founder_card(row, ownership) -> str:
       {_flag_pill(tier_label, tier_class)}
       <div class="meta"><strong>HQ:</strong> {country} · <strong>Founder:</strong> {html.escape(row['founder_name'] or 'unknown')} · <strong>Network effect:</strong> {network_effect}</div>
       <div class="read">{read_text}</div>
+      {delisted_html}
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
@@ -225,7 +265,7 @@ def build_site_html() -> str:
     with db.connect() as conn:
         biotech_rows = conn.execute(
             """
-            SELECT d.*, c.ticker_verified
+            SELECT d.*, c.ticker_verified, c.delisted_or_acquired, c.ticker_verification_reason
             FROM designations d
             JOIN companies c ON c.ticker = d.ticker
             ORDER BY d.date_granted DESC, d.drug_name
@@ -289,7 +329,7 @@ def build_site_html() -> str:
   </header>
 
   <div class="banner">
-    <b>How to validate this:</b> click "Verify" on each card — it goes straight to the source filing or trial record, not a paraphrase of one. Cards marked with a dashed, amber ticker failed independent verification (a second source didn't confirm the match) and are shown as-is rather than silently dropped or silently trusted. Nothing on this page is investment advice — confidence flags describe clinical/ownership facts, not buy or sell recommendations.
+    <b>How to validate this:</b> click "Verify" on each card — it goes straight to the source filing or trial record, not a paraphrase of one. Cards marked with a dashed, amber ticker failed independent verification (a second source didn't confirm the match) and are shown as-is rather than silently dropped or silently trusted. A solid purple ticker means something different: the match is very likely correct, but the company is confirmed no longer an active, tradable listing (acquired, delisted, gone private) — a real-world status change, not a matching failure. Nothing on this page is investment advice — confidence flags describe clinical/ownership facts, not buy or sell recommendations.
   </div>
 
   <h2 class="section-title">Biotech signals</h2>

@@ -1,0 +1,74 @@
+name: Weekly pipeline
+
+on:
+  schedule:
+    # Mondays 13:00 UTC. Cron uses UTC regardless of runner locale — adjust
+    # here if you want the digest to land at a different local time.
+    - cron: "0 13 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      # SEC_USER_AGENT is required for every SEC EDGAR call this job makes
+      # (ticker matching, ticker verification's EDGAR fallback, founder
+      # filing lookups) — SEC returns 403 without a real one. ANTHROPIC_API_KEY
+      # is required for both `run`'s clinical summaries and `run-founders`'
+      # extraction. OPENFIGI_API_KEY is optional (matching/ticker_match.py's
+      # fallback works without one, just at a lower rate limit) — leaving
+      # this secret unset is fine, it resolves to an empty string, which the
+      # code already treats the same as "no key".
+      #
+      # SMTP_HOST/SMTP_PORT are deliberately NOT set here: they default to
+      # Gmail (smtp.gmail.com:587) in config.py, and setting an unset GitHub
+      # secret still defines the env var as an empty string, which would
+      # override that default with "" rather than leaving it alone. Add
+      # SMTP_HOST/SMTP_PORT secrets AND matching entries in this env block
+      # only if you need a non-Gmail provider.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      DIGEST_FROM_EMAIL: ${{ secrets.DIGEST_FROM_EMAIL }}
+      DIGEST_TO_EMAIL: ${{ secrets.DIGEST_TO_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Restore db from last committed dump
+        run: signal-screener db-restore -v
+
+      - name: Run biotech signal pipeline (FDA + EMA)
+        run: signal-screener run -v
+
+      - name: Run founder-led screener
+        run: signal-screener run-founders -v
+
+      - name: Send weekly digest
+        run: signal-screener digest -v
+
+      - name: Generate static site
+        run: signal-screener generate-site -v
+
+      - name: Dump db to plain-text SQL
+        run: signal-screener db-dump -v
+
+      - name: Commit updated site and db dump if changed
+        run: |
+          git config user.name "signal-screener-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/index.html data/signal_screener.sql
+          git diff --cached --quiet || git commit -m "Weekly site + db refresh $(date -u +%Y-%m-%d)"
+          git push

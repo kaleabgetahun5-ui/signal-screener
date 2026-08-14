@@ -51,7 +51,14 @@ def _wrap(text: str, indent: str = "    ") -> str:
     )
 
 
-def _ticker_label(ticker: str, verified: bool) -> str:
+def _ticker_label(ticker: str, verified: bool, delisted_or_acquired: bool = False) -> str:
+    # Brief section 4's "listing status changed" case is deliberately a
+    # distinct label, not folded into [UNVERIFIED TICKER] — the match is
+    # very likely correct; what changed is that the company isn't a live,
+    # tradable listing anymore (acquired, delisted, gone private), which is
+    # a real-world fact worth knowing, not a data-quality problem.
+    if delisted_or_acquired:
+        return f"{ticker} [DELISTED/ACQUIRED]"
     if ticker.startswith("UNVERIFIED::") or not verified:
         return f"{ticker} [UNVERIFIED TICKER]"
     return ticker
@@ -60,7 +67,8 @@ def _ticker_label(ticker: str, verified: bool) -> str:
 def _build_biotech_section(conn) -> str:
     rows = conn.execute(
         """
-        SELECT d.*, c.company_name AS resolved_company_name, c.ticker_verified
+        SELECT d.*, c.company_name AS resolved_company_name, c.ticker_verified,
+               c.delisted_or_acquired, c.ticker_verification_reason
         FROM designations d
         JOIN companies c ON c.ticker = d.ticker
         ORDER BY d.date_granted DESC, d.drug_name
@@ -72,12 +80,19 @@ def _build_biotech_section(conn) -> str:
 
     lines = []
     for row in rows:
-        ticker_label = _ticker_label(row["ticker"], bool(row["ticker_verified"]))
+        ticker_label = _ticker_label(
+            row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
+        )
         lines.append(
             f"[{row['source']}] {row['drug_name']} "
             f"— {row['resolved_company_name']} ({ticker_label})"
         )
-        lines.append(f"    Designation: {row['type']}, granted {row['date_granted']}")
+        if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
+            lines.append(_wrap(row["ticker_verification_reason"]))
+        granted_line = f"    Designation: {row['type']}, granted {row['date_granted']}"
+        if row["date_granted_source"]:
+            granted_line += f" (source: {row['date_granted_source']})"
+        lines.append(granted_line)
         flag = row["summary_confidence_flag"] or "not yet summarized"
         lines.append(f"    Confidence: {flag}")
         if row["summary_text"]:
@@ -110,8 +125,12 @@ def _build_founder_section(conn) -> str:
 
     lines = []
     for row in rows:
-        ticker_label = _ticker_label(row["ticker"], bool(row["ticker_verified"]))
+        ticker_label = _ticker_label(
+            row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
+        )
         lines.append(f"{ticker_label} — {row['company_name']} [{row['founder_tier']}]")
+        if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
+            lines.append(_wrap(row["ticker_verification_reason"]))
 
         ownership = conn.execute(
             "SELECT * FROM ownership WHERE ticker = ? ORDER BY as_of_date DESC, "
@@ -140,11 +159,43 @@ def _build_founder_section(conn) -> str:
     return "\n".join(lines)
 
 
+def _failure_count_line(conn) -> str:
+    """Item 6, failure visibility: a snapshot of the current database's
+    known problems, not just this run's — the digest isn't tied to a
+    specific pipeline run, so this re-derives the same categories
+    pipeline.RunSummary/founder_pipeline.RunSummary track from whatever
+    state the tables are actually in right now."""
+    # delisted_or_acquired = 0 excluded from "unverified": that status is a
+    # confirmed real-world fact, not a data-quality problem — counted and
+    # reported separately below instead.
+    unverified = conn.execute(
+        "SELECT COUNT(*) AS n FROM companies WHERE ticker_verified = 0 AND delisted_or_acquired = 0"
+    ).fetchone()["n"]
+    delisted_or_acquired = conn.execute(
+        "SELECT COUNT(*) AS n FROM companies WHERE delisted_or_acquired = 1"
+    ).fetchone()["n"]
+    unsummarized = conn.execute(
+        "SELECT COUNT(*) AS n FROM designations WHERE summary_text IS NULL"
+    ).fetchone()["n"]
+    unresolved_founder_tier = conn.execute(
+        "SELECT COUNT(*) AS n FROM companies WHERE listing_type = 'ADR' AND founder_tier = 'N/A' "
+        "AND delisted_or_acquired = 0"
+    ).fetchone()["n"]
+    total_failures = unverified + unsummarized + unresolved_founder_tier
+    return (
+        f"{total_failures} failure(s): {unverified} unverified ticker(s), "
+        f"{unsummarized} designation(s) missing a summary, "
+        f"{unresolved_founder_tier} founder-led compan(ies) with unresolved status "
+        f"| {delisted_or_acquired} delisted/acquired (not a failure — see cards/rows above)"
+    )
+
+
 def build_digest() -> Digest:
     db.init_db()
     with db.connect() as conn:
         biotech_section = _build_biotech_section(conn)
         founder_section = _build_founder_section(conn)
+        failure_line = _failure_count_line(conn)
 
     today = date.today().isoformat()
     body = f"""SIGNAL SCREENER — WEEKLY DIGEST
@@ -161,7 +212,12 @@ BIOTECH SIGNALS (FDA Breakthrough Therapy / EMA PRIME)
 FOUNDER-LED COMPANIES (Tier 1 / ADR)
 ================================================
 
-{founder_section}"""
+{founder_section}
+================================================
+DATA QUALITY
+================================================
+
+{failure_line}"""
 
     return Digest(subject=f"Signal Screener Weekly Digest — {today}", body=body)
 

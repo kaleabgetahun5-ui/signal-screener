@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 from signal_screener.config import DB_PATH
 from signal_screener.models import Company, Designation, Ownership, Trial
@@ -18,11 +19,15 @@ CREATE TABLE IF NOT EXISTS companies (
     ticker_verified INTEGER NOT NULL DEFAULT 0,
     ticker_verification_source TEXT,
     ticker_verification_date TEXT,
+    ticker_verification_reason TEXT,
     ticker_match_confidence REAL,
     founder_name TEXT,
     network_effect TEXT,
     founder_tier_source TEXT,
-    founder_tier_as_of_date TEXT
+    founder_tier_as_of_date TEXT,
+    -- Brief section 4's "listing status changed" case — see models.py's
+    -- Company.delisted_or_acquired.
+    delisted_or_acquired INTEGER NOT NULL DEFAULT 0
 );
 
 -- Append-only: one row per (re-)classification run, so founder ownership
@@ -59,7 +64,10 @@ CREATE TABLE IF NOT EXISTS designations (
     raw_company_name TEXT NOT NULL,
     summary_text TEXT,
     summary_confidence_flag TEXT,
-    summary_generated_at TEXT
+    summary_generated_at TEXT,
+    -- Citation for date_granted specifically (a press release/filing URL),
+    -- not just data_source's "manual_seed:<file>" — see models.py.
+    date_granted_source TEXT
 );
 
 CREATE TABLE IF NOT EXISTS trials (
@@ -88,9 +96,51 @@ def connect():
         conn.close()
 
 
+# Columns added after a table's initial CREATE TABLE IF NOT EXISTS won't
+# retroactively appear in an existing local db file (SQLite doesn't apply
+# schema changes to already-created tables) — added here one at a time as
+# they come up, rather than a full migration framework this project doesn't
+# need yet.
+_MIGRATIONS = [
+    ("designations", "date_granted_source", "TEXT"),
+    ("companies", "ticker_verification_reason", "TEXT"),
+    ("companies", "delisted_or_acquired", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection):
+    for table, column, coltype in _MIGRATIONS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
 def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _apply_migrations(conn)
+
+
+def dump_sql(path: Path) -> None:
+    """Writes the db as a plain-text SQL script (sqlite3's .dump, via the
+    stdlib's iterdump() — no sqlite3 CLI tool required). This, not the
+    binary db file, is what's committed to git: git-diffable and mergeable,
+    where a binary sqlite file is neither. Used by the weekly GitHub Actions
+    workflow to persist state (in particular the ownership table's history)
+    across otherwise-ephemeral CI runs — see restore_sql()."""
+    init_db()
+    with connect() as conn:
+        path.write_text("\n".join(conn.iterdump()) + "\n", encoding="utf-8")
+
+
+def restore_sql(path: Path) -> None:
+    """Rebuilds the db from a dump written by dump_sql(). Drops any existing
+    db file first so this is a clean restore, not a merge on top of
+    whatever happened to already be at DB_PATH."""
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+    with connect() as conn:
+        conn.executescript(path.read_text(encoding="utf-8"))
 
 
 def upsert_company(conn: sqlite3.Connection, company: Company):
@@ -99,9 +149,10 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
         INSERT INTO companies (
             ticker, company_name, exchange, country, market_cap, currency, sector,
             founder_tier, listing_type, ticker_verified, ticker_verification_source,
-            ticker_verification_date, ticker_match_confidence, founder_name,
-            network_effect, founder_tier_source, founder_tier_as_of_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ticker_verification_date, ticker_verification_reason, ticker_match_confidence,
+            founder_name, network_effect, founder_tier_source, founder_tier_as_of_date,
+            delisted_or_acquired
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker) DO UPDATE SET
             company_name=excluded.company_name,
             exchange=excluded.exchange,
@@ -114,11 +165,13 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             ticker_verified=excluded.ticker_verified,
             ticker_verification_source=excluded.ticker_verification_source,
             ticker_verification_date=excluded.ticker_verification_date,
+            ticker_verification_reason=excluded.ticker_verification_reason,
             ticker_match_confidence=excluded.ticker_match_confidence,
             founder_name=excluded.founder_name,
             network_effect=excluded.network_effect,
             founder_tier_source=excluded.founder_tier_source,
-            founder_tier_as_of_date=excluded.founder_tier_as_of_date
+            founder_tier_as_of_date=excluded.founder_tier_as_of_date,
+            delisted_or_acquired=excluded.delisted_or_acquired
         """,
         (
             company.ticker,
@@ -133,11 +186,13 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             int(company.ticker_verified),
             company.ticker_verification_source,
             company.ticker_verification_date,
+            company.ticker_verification_reason,
             company.ticker_match_confidence,
             company.founder_name,
             company.network_effect,
             company.founder_tier_source,
             company.founder_tier_as_of_date,
+            int(company.delisted_or_acquired),
         ),
     )
 
@@ -165,8 +220,9 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
         INSERT INTO designations (
             designation_id, ticker, source, type, date_granted, drug_name,
             indication, trial_id, data_source, data_as_of_date, raw_company_name,
-            summary_text, summary_confidence_flag, summary_generated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            summary_text, summary_confidence_flag, summary_generated_at,
+            date_granted_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(designation_id) DO UPDATE SET
             ticker=excluded.ticker,
             source=excluded.source,
@@ -180,7 +236,8 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             raw_company_name=excluded.raw_company_name,
             summary_text=excluded.summary_text,
             summary_confidence_flag=excluded.summary_confidence_flag,
-            summary_generated_at=excluded.summary_generated_at
+            summary_generated_at=excluded.summary_generated_at,
+            date_granted_source=excluded.date_granted_source
         """,
         (
             designation.designation_id,
@@ -197,6 +254,7 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             designation.summary_text,
             designation.summary_confidence_flag,
             designation.summary_generated_at,
+            designation.date_granted_source,
         ),
     )
 
