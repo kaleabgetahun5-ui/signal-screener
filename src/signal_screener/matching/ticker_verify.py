@@ -68,6 +68,14 @@ class VerificationResult:
     # was likely right, and we know *why* it's not currently verifiable as
     # an active listing. See check_delisted_or_acquired().
     delisted_or_acquired: bool = False
+    # Set only when Yahoo confirmed the company under an exchange-suffixed
+    # symbol the input ticker didn't have (e.g. input "ZAL", Yahoo's real
+    # symbol "ZAL.DE") — see _verify_via_yahoo's base-ticker fallback,
+    # added for Tier 2 international companies. matching/resolve.py
+    # substitutes this back in as the ticker actually used downstream
+    # (site links, price fetches) once the plain, unsuffixed guess
+    # OpenFIGI/ticker_match.py returns wouldn't otherwise resolve anywhere.
+    resolved_ticker: str | None = None
 
 
 def _get_json_with_retry(url: str, *, params: dict, headers: dict, timeout: int) -> dict:
@@ -126,7 +134,26 @@ def _verify_via_yahoo(ticker: str, expected_company_name: str, checked_date: str
         )
 
     exact_symbol_matches = [q for q in quotes if q.get("symbol", "").upper() == ticker.upper()]
-    if not exact_symbol_matches:
+    resolved_ticker = None
+    candidates = exact_symbol_matches
+
+    if not candidates:
+        # Base-ticker fallback for non-US listings: matching/ticker_match.py's
+        # OpenFIGI path (Tier 2 international companies) returns a bare
+        # home-market ticker ("ZAL"), but Yahoo's real symbol for a non-US
+        # listing is exchange-suffixed ("ZAL.DE") — an exact-match-only
+        # check fails every single Tier 2 company for a reason that has
+        # nothing to do with whether the match is right. A symbol is
+        # accepted here only if its part before the first "." matches the
+        # input exactly, so "ZAL.DE"/"ZAL.HM" match ticker "ZAL" but
+        # "ZALN.MU" (a different suffix on the base itself) does not.
+        base_matches = [
+            q for q in quotes if q.get("symbol", "").upper().split(".")[0] == ticker.upper()
+        ]
+        if base_matches:
+            candidates = base_matches
+
+    if not candidates:
         return VerificationResult(
             verified=False,
             source=source,
@@ -134,13 +161,18 @@ def _verify_via_yahoo(ticker: str, expected_company_name: str, checked_date: str
             reason=f"no listing found for symbol {ticker!r}",
         )
 
-    best_name_score = max(
-        fuzz.token_set_ratio(
+    best = max(
+        candidates,
+        key=lambda q: fuzz.token_set_ratio(
             expected_company_name,
             q.get("shortname") or q.get("longname") or "",
             processor=utils.default_process,
-        )
-        for q in exact_symbol_matches
+        ),
+    )
+    best_name_score = fuzz.token_set_ratio(
+        expected_company_name,
+        best.get("shortname") or best.get("longname") or "",
+        processor=utils.default_process,
     )
     if best_name_score < MIN_VERIFY_SCORE:
         return VerificationResult(
@@ -153,11 +185,16 @@ def _verify_via_yahoo(ticker: str, expected_company_name: str, checked_date: str
             ),
         )
 
+    if candidates is not exact_symbol_matches:
+        resolved_ticker = best.get("symbol")
+
     return VerificationResult(
         verified=True,
         source=source,
         checked_date=checked_date,
-        reason=f"symbol and company name confirmed (score={best_name_score:.0f})",
+        reason=f"symbol and company name confirmed (score={best_name_score:.0f})"
+        + (f" — resolved to {resolved_ticker!r}" if resolved_ticker else ""),
+        resolved_ticker=resolved_ticker,
     )
 
 

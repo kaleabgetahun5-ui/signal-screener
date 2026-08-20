@@ -42,6 +42,7 @@ import anthropic
 from signal_screener.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 
 ALLOWED_FOUNDER_TIERS = ("Founder-CEO", "Founder-Chair", "Founder-departed")
+ALLOWED_NETWORK_EFFECT_STRENGTHS = ("Established", "Emerging", "None identified")
 
 PROMPT_TEMPLATE = """Given this excerpt from {company_name}'s annual report or 20-F filing, extract:
 1. Is the original founder still in an active leadership role (CEO, Chair, or
@@ -53,22 +54,30 @@ PROMPT_TEMPLATE = """Given this excerpt from {company_name}'s annual report or 2
    "Founder-departed" (neither of the above applies). If the transition
    date isn't in this excerpt, say so explicitly rather than guessing
    how recent it was.
-4. One sentence describing the company's core network effect, if one exists
-   (e.g., more users → more value for each user), or "None identified" if
-   the business model doesn't have one. Unlike items 1-3, this question is
-   about the company's general business model, not something the leadership/
-   ownership excerpt itself will describe — answer it from general knowledge
-   of the company, not from the excerpt. (This distinction matters: an
-   earlier build of this prompt scoped item 4 to excerpt-only too, and it
-   silently returned "None identified" for genuinely network-effect
-   businesses like Sea Limited and Grab, simply because leadership/ownership
-   sections never discuss business model.)
+4. Classify the company's network effect using exactly one of these three
+   labels, per the defined criteria below — not a free-form judgment call —
+   and write one sentence describing it (or explaining why none exists):
+   - "Established" — the network effect has operated at scale for multiple
+     years and is central to the business model (e.g., a two-sided
+     marketplace with real switching costs and evidence of compounding
+     user growth).
+   - "Emerging" — a network effect exists per the business model but is
+     newer or secondary to it.
+   - "None identified" — the business model doesn't have one.
+   Unlike items 1-3, this question is about the company's general business
+   model, not something the leadership/ownership excerpt itself will
+   describe — answer it from general knowledge of the company, not from
+   the excerpt. (This distinction matters: an earlier build of this prompt
+   scoped item 4 to excerpt-only too, and it silently returned "None
+   identified" for genuinely network-effect businesses like Sea Limited and
+   Grab, simply because leadership/ownership sections never discuss
+   business model.)
 
 Source text:
 {report_excerpt}
 
 Respond with ONLY a JSON object, no other text, in this exact shape:
-{{"leadership_status": "<item 1, including current title or 'no active leadership role'>", "ownership_stake": "<item 2 as stated in the excerpt, or 'not disclosed in this excerpt'>", "ownership_pct_numeric": <item 2 as a plain number like 7.0, or null if not disclosed>, "founder_tier": "<item 3, exactly one of Founder-CEO / Founder-Chair / Founder-departed>", "transition_date": "<the date the founder stepped back from CEO, as YYYY-MM-DD if a specific date is stated in the excerpt, or null if not stated>", "network_effect": "<item 4>"}}
+{{"leadership_status": "<item 1, including current title or 'no active leadership role'>", "ownership_stake": "<item 2 as stated in the excerpt, or 'not disclosed in this excerpt'>", "ownership_pct_numeric": <item 2 as a plain number like 7.0, or null if not disclosed>, "founder_tier": "<item 3, exactly one of Founder-CEO / Founder-Chair / Founder-departed>", "transition_date": "<the date the founder stepped back from CEO, as YYYY-MM-DD if a specific date is stated in the excerpt, or null if not stated>", "network_effect": "<item 4's one-sentence description>", "network_effect_strength": "<item 4's label, exactly one of Established / Emerging / None identified>"}}
 """
 
 
@@ -80,6 +89,7 @@ class FounderExtraction:
     founder_tier: str
     transition_date: str | None
     network_effect: str
+    network_effect_strength: str
     generated_at: str
 
 
@@ -110,6 +120,13 @@ def extract_founder_status(*, company_name: str, report_excerpt: str) -> Founder
             f"must be exactly one of {ALLOWED_FOUNDER_TIERS}"
         )
 
+    strength = parsed.get("network_effect_strength")
+    if strength not in ALLOWED_NETWORK_EFFECT_STRENGTHS:
+        raise ValueError(
+            f"Claude returned an invalid network_effect_strength {strength!r}; "
+            f"must be exactly one of {ALLOWED_NETWORK_EFFECT_STRENGTHS}"
+        )
+
     return FounderExtraction(
         leadership_status=parsed["leadership_status"],
         ownership_stake=parsed["ownership_stake"],
@@ -117,5 +134,6 @@ def extract_founder_status(*, company_name: str, report_excerpt: str) -> Founder
         founder_tier=tier,
         transition_date=parsed.get("transition_date"),
         network_effect=parsed["network_effect"],
+        network_effect_strength=strength,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )

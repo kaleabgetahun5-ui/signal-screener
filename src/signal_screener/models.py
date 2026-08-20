@@ -45,6 +45,12 @@ class Company:
     delisted_or_acquired: bool = False
     founder_name: str | None = None
     network_effect: str | None = None
+    # "Established" | "Emerging" | "None identified" — see
+    # summarize/founder_extraction.py's ALLOWED_NETWORK_EFFECT_STRENGTHS.
+    # Drives the track-record trigger rule (tracked_outcomes.py) alongside
+    # founder_tier: Founder-CEO+Established -> High signal, Founder-CEO+
+    # Emerging -> capped at Moderate, Founder-Chair -> Moderate regardless.
+    network_effect_strength: str | None = None
     founder_tier_source: str | None = None  # e.g. SEC filing URL/accession used
     founder_tier_as_of_date: str | None = None
 

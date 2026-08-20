@@ -108,7 +108,7 @@ def _build_founder_section(conn) -> str:
     rows = conn.execute(
         """
         SELECT * FROM companies
-        WHERE listing_type = 'ADR'
+        WHERE listing_type IN ('ADR', 'primary')
         ORDER BY
             CASE founder_tier
                 WHEN 'Founder-CEO' THEN 0
@@ -148,7 +148,8 @@ def _build_founder_section(conn) -> str:
             lines.append(f"    Founder: {row['founder_name']}")
 
         if row["network_effect"]:
-            lines.append(_wrap(f"Network effect: {row['network_effect']}"))
+            strength = f"[{row['network_effect_strength']}] " if row["network_effect_strength"] else ""
+            lines.append(_wrap(f"Network effect: {strength}{row['network_effect']}"))
 
         if row["founder_tier_source"]:
             lines.append(
@@ -178,8 +179,8 @@ def _failure_count_line(conn) -> str:
         "SELECT COUNT(*) AS n FROM designations WHERE summary_text IS NULL"
     ).fetchone()["n"]
     unresolved_founder_tier = conn.execute(
-        "SELECT COUNT(*) AS n FROM companies WHERE listing_type = 'ADR' AND founder_tier = 'N/A' "
-        "AND delisted_or_acquired = 0"
+        "SELECT COUNT(*) AS n FROM companies WHERE listing_type IN ('ADR', 'primary') "
+        "AND founder_tier = 'N/A' AND delisted_or_acquired = 0"
     ).fetchone()["n"]
     total_failures = unverified + unsummarized + unresolved_founder_tier
     return (

@@ -1,9 +1,19 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from signal_screener.config import DB_PATH
 from signal_screener.models import Company, Designation, Ownership, Trial
+
+
+def now_iso() -> str:
+    """UTC timestamp with time-of-day precision, used everywhere a
+    diffable timestamp is needed (first_seen_at, site_state.last_generated_at)
+    — not date.today()'s date-only granularity, which can't distinguish
+    "added this morning" from "site generated this evening, same day.\""""
+    return datetime.now(timezone.utc).isoformat()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
@@ -23,11 +33,22 @@ CREATE TABLE IF NOT EXISTS companies (
     ticker_match_confidence REAL,
     founder_name TEXT,
     network_effect TEXT,
+    -- "Established" | "Emerging" | "None identified" — see models.py's
+    -- Company.network_effect_strength.
+    network_effect_strength TEXT,
     founder_tier_source TEXT,
     founder_tier_as_of_date TEXT,
     -- Brief section 4's "listing status changed" case — see models.py's
     -- Company.delisted_or_acquired.
-    delisted_or_acquired INTEGER NOT NULL DEFAULT 0
+    delisted_or_acquired INTEGER NOT NULL DEFAULT 0,
+    -- Set once, on first insert, by upsert_company() — never touched by a
+    -- later update/re-verification. Brief section 8/roadmap step 5's "what's
+    -- new since last time" diff (site.py) is entirely driven off this: a row
+    -- is "new" iff first_seen_at is after the previous site generation.
+    -- NULL for rows that existed before this column was added (migrated,
+    -- not backfilled) — deliberately: we don't actually know when those
+    -- were first seen, so they must never show up as "new."
+    first_seen_at TEXT
 );
 
 -- Append-only: one row per (re-)classification run, so founder ownership
@@ -67,7 +88,62 @@ CREATE TABLE IF NOT EXISTS designations (
     summary_generated_at TEXT,
     -- Citation for date_granted specifically (a press release/filing URL),
     -- not just data_source's "manual_seed:<file>" — see models.py.
-    date_granted_source TEXT
+    date_granted_source TEXT,
+    -- See companies.first_seen_at above — same semantics.
+    first_seen_at TEXT
+);
+
+-- Singleton (id is always 1, enforced below) — the timestamp of the most
+-- recent generate-site run, read *before* being overwritten so the
+-- "new since last visit" section (site.py) has something to diff against.
+CREATE TABLE IF NOT EXISTS site_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_generated_at TEXT
+);
+
+-- Brief section 2's schema, exactly: note_id, entry_id, date_written,
+-- note_text. entry_id is a designation_id or a ticker — the two ID spaces
+-- never collide (designation_ids are 16-char lowercase hex hashes, tickers
+-- are short uppercase symbols), so one column serves both without an
+-- entry_type discriminator, matching the brief's minimal schema as given.
+CREATE TABLE IF NOT EXISTS user_notes (
+    note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id TEXT NOT NULL,
+    date_written TEXT NOT NULL,
+    note_text TEXT NOT NULL
+);
+
+-- Roadmap step 6 / brief section 2 & 8: "the single most important
+-- addition" — the brief's core columns (entry_id, entry_type, date_flagged,
+-- flag_given, price_at_flag/3mo/6mo/12mo, notes_on_outcome) plus practical
+-- additions the bare schema doesn't cover but the "source + as-of date on
+-- everything" guardrail (section 6) requires: ticker (entry_id alone
+-- doesn't carry one), price_source, and a real as-of date per checkpoint —
+-- price_at_3mo means little without knowing exactly when it was captured,
+-- which won't be exactly 3 months to the day on a weekly check schedule.
+-- entry_id is UNIQUE: one row per entry, created once at first qualifying
+-- flag (see track_record.py) and never overwritten, even if the flag
+-- itself changes on a later run — see that module's docstring.
+CREATE TABLE IF NOT EXISTS tracked_outcomes (
+    outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id TEXT NOT NULL UNIQUE,
+    entry_type TEXT NOT NULL,  -- "designation" | "founder_stock"
+    ticker TEXT NOT NULL,
+    date_flagged TEXT NOT NULL,
+    flag_given TEXT NOT NULL,  -- "High signal" | "Moderate signal"
+    price_source TEXT,
+    price_at_flag REAL,
+    price_at_flag_date TEXT,
+    check_3mo_due TEXT NOT NULL,
+    price_at_3mo REAL,
+    price_at_3mo_date TEXT,
+    check_6mo_due TEXT NOT NULL,
+    price_at_6mo REAL,
+    price_at_6mo_date TEXT,
+    check_12mo_due TEXT NOT NULL,
+    price_at_12mo REAL,
+    price_at_12mo_date TEXT,
+    notes_on_outcome TEXT
 );
 
 CREATE TABLE IF NOT EXISTS trials (
@@ -105,6 +181,11 @@ _MIGRATIONS = [
     ("designations", "date_granted_source", "TEXT"),
     ("companies", "ticker_verification_reason", "TEXT"),
     ("companies", "delisted_or_acquired", "INTEGER NOT NULL DEFAULT 0"),
+    # No DEFAULT on purpose: existing rows become NULL, not "just seen" —
+    # see the first_seen_at column comment on companies/designations above.
+    ("companies", "first_seen_at", "TEXT"),
+    ("designations", "first_seen_at", "TEXT"),
+    ("companies", "network_effect_strength", "TEXT"),
 ]
 
 
@@ -144,15 +225,20 @@ def restore_sql(path: Path) -> None:
 
 
 def upsert_company(conn: sqlite3.Connection, company: Company):
+    # first_seen_at is bound below but deliberately absent from ON CONFLICT
+    # DO UPDATE SET — that's the entire mechanism for "set once, on first
+    # insert, never touched by a later update": on conflict, SQLite applies
+    # only the columns listed there, so an existing row's first_seen_at is
+    # left exactly as it was.
     conn.execute(
         """
         INSERT INTO companies (
             ticker, company_name, exchange, country, market_cap, currency, sector,
             founder_tier, listing_type, ticker_verified, ticker_verification_source,
             ticker_verification_date, ticker_verification_reason, ticker_match_confidence,
-            founder_name, network_effect, founder_tier_source, founder_tier_as_of_date,
-            delisted_or_acquired
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            founder_name, network_effect, network_effect_strength, founder_tier_source,
+            founder_tier_as_of_date, delisted_or_acquired, first_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker) DO UPDATE SET
             company_name=excluded.company_name,
             exchange=excluded.exchange,
@@ -169,6 +255,7 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             ticker_match_confidence=excluded.ticker_match_confidence,
             founder_name=excluded.founder_name,
             network_effect=excluded.network_effect,
+            network_effect_strength=excluded.network_effect_strength,
             founder_tier_source=excluded.founder_tier_source,
             founder_tier_as_of_date=excluded.founder_tier_as_of_date,
             delisted_or_acquired=excluded.delisted_or_acquired
@@ -190,9 +277,11 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             company.ticker_match_confidence,
             company.founder_name,
             company.network_effect,
+            company.network_effect_strength,
             company.founder_tier_source,
             company.founder_tier_as_of_date,
             int(company.delisted_or_acquired),
+            now_iso(),
         ),
     )
 
@@ -215,14 +304,16 @@ def insert_ownership(conn: sqlite3.Connection, ownership: Ownership):
 
 
 def upsert_designation(conn: sqlite3.Connection, designation: Designation):
+    # first_seen_at: same "set once, never in ON CONFLICT DO UPDATE SET"
+    # mechanism as upsert_company() above.
     conn.execute(
         """
         INSERT INTO designations (
             designation_id, ticker, source, type, date_granted, drug_name,
             indication, trial_id, data_source, data_as_of_date, raw_company_name,
             summary_text, summary_confidence_flag, summary_generated_at,
-            date_granted_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            date_granted_source, first_seen_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(designation_id) DO UPDATE SET
             ticker=excluded.ticker,
             source=excluded.source,
@@ -255,6 +346,7 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             designation.summary_confidence_flag,
             designation.summary_generated_at,
             designation.date_granted_source,
+            now_iso(),
         ),
     )
 
@@ -285,4 +377,141 @@ def upsert_trial(conn: sqlite3.Connection, trial: Trial):
             trial.condition,
             trial.fetched_at,
         ),
+    )
+
+
+def get_last_generated_at(conn: sqlite3.Connection) -> str | None:
+    """The timestamp of the *previous* generate-site run, read before
+    set_last_generated_at() overwrites it — this is what site.py's "new
+    since last visit" section diffs first_seen_at against. None means
+    generate-site has never run before (nothing to diff against yet)."""
+    row = conn.execute("SELECT last_generated_at FROM site_state WHERE id = 1").fetchone()
+    return row["last_generated_at"] if row else None
+
+
+def set_last_generated_at(conn: sqlite3.Connection, timestamp: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO site_state (id, last_generated_at) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET last_generated_at=excluded.last_generated_at
+        """,
+        (timestamp,),
+    )
+
+
+def insert_user_note(conn: sqlite3.Connection, entry_id: str, note_text: str, date_written: str) -> None:
+    conn.execute(
+        "INSERT INTO user_notes (entry_id, date_written, note_text) VALUES (?, ?, ?)",
+        (entry_id, date_written, note_text),
+    )
+
+
+def get_notes_for_entry(conn: sqlite3.Connection, entry_id: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM user_notes WHERE entry_id = ? ORDER BY date_written, note_id",
+        (entry_id,),
+    ).fetchall()
+
+
+def entry_id_exists(conn: sqlite3.Connection, entry_id: str) -> bool:
+    """Best-effort typo check for the add-note CLI command — entry_id isn't
+    a foreign key (it points into two different tables depending on
+    designation vs. ticker, see user_notes' schema comment), so nothing
+    enforces it at the db level. Used to warn, not to block: a note for an
+    entry_id that doesn't exist yet (e.g. added just before the next
+    pipeline run) is still saved."""
+    if conn.execute(
+        "SELECT 1 FROM designations WHERE designation_id = ?", (entry_id,)
+    ).fetchone():
+        return True
+    if conn.execute("SELECT 1 FROM companies WHERE ticker = ?", (entry_id,)).fetchone():
+        return True
+    return False
+
+
+def tracked_outcome_exists(conn: sqlite3.Connection, entry_id: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM tracked_outcomes WHERE entry_id = ?", (entry_id,)
+        ).fetchone()
+        is not None
+    )
+
+
+def insert_tracked_outcome(
+    conn: sqlite3.Connection,
+    *,
+    entry_id: str,
+    entry_type: str,
+    ticker: str,
+    date_flagged: str,
+    flag_given: str,
+    price_source: str | None,
+    price_at_flag: float | None,
+    price_at_flag_date: str | None,
+    check_3mo_due: str,
+    check_6mo_due: str,
+    check_12mo_due: str,
+    notes_on_outcome: str | None,
+) -> None:
+    """INSERT OR IGNORE, not upsert: entry_id is UNIQUE and track_record.py
+    already checks tracked_outcome_exists() before calling this, but the
+    OR IGNORE is defense-in-depth for the same "created once, never
+    overwritten" invariant — see this table's schema comment."""
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO tracked_outcomes (
+            entry_id, entry_type, ticker, date_flagged, flag_given,
+            price_source, price_at_flag, price_at_flag_date,
+            check_3mo_due, check_6mo_due, check_12mo_due, notes_on_outcome
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            entry_id,
+            entry_type,
+            ticker,
+            date_flagged,
+            flag_given,
+            price_source,
+            price_at_flag,
+            price_at_flag_date,
+            check_3mo_due,
+            check_6mo_due,
+            check_12mo_due,
+            notes_on_outcome,
+        ),
+    )
+
+
+_VALID_CHECKPOINTS = ("3mo", "6mo", "12mo")
+
+
+def get_due_outcome_checkpoints(
+    conn: sqlite3.Connection, checkpoint: str, as_of_date: str
+) -> list[sqlite3.Row]:
+    """Rows whose checkpoint came due on or before as_of_date and haven't
+    been recorded yet — what check_record_outcomes.py's checker acts on."""
+    if checkpoint not in _VALID_CHECKPOINTS:
+        raise ValueError(f"checkpoint must be one of {_VALID_CHECKPOINTS}, got {checkpoint!r}")
+    return conn.execute(
+        f"""
+        SELECT outcome_id, ticker FROM tracked_outcomes
+        WHERE check_{checkpoint}_due <= ? AND price_at_{checkpoint} IS NULL
+        """,
+        (as_of_date,),
+    ).fetchall()
+
+
+def record_outcome_checkpoint(
+    conn: sqlite3.Connection, outcome_id: int, checkpoint: str, price: float, price_date: str
+) -> None:
+    if checkpoint not in _VALID_CHECKPOINTS:
+        raise ValueError(f"checkpoint must be one of {_VALID_CHECKPOINTS}, got {checkpoint!r}")
+    conn.execute(
+        f"""
+        UPDATE tracked_outcomes
+        SET price_at_{checkpoint} = ?, price_at_{checkpoint}_date = ?
+        WHERE outcome_id = ?
+        """,
+        (price, price_date, outcome_id),
     )

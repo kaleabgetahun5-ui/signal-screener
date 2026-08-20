@@ -25,7 +25,7 @@ filing on sec.gov.
 """
 
 import html
-from datetime import date, timezone
+from datetime import date, datetime
 
 from signal_screener import db
 
@@ -102,6 +102,17 @@ CSS = """
   .delisted-note{font-size:13px; color:var(--delisted); line-height:1.5; margin:0 22px 14px; padding:10px 12px; background:var(--delisted-bg); border-radius:6px;}
   .card.with-tab .delisted-note{margin:0 22px 14px;}
 
+  .notes{border-top:1px dashed var(--line); padding-top:12px; margin:0 22px 14px; font-size:13.5px; color:var(--ink);}
+  .card.with-tab .notes{margin:0 22px 14px;}
+  .notes-label{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); display:block; margin-bottom:6px;}
+  .notes ul{margin:0; padding-left:18px;}
+  .notes li{margin-bottom:4px; line-height:1.5;}
+  .note-date{font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--ink-soft);}
+
+  .new-since{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 22px 8px; margin-bottom:36px;}
+  .subsection-title{font-family:'Source Serif 4', serif; font-weight:600; font-size:16px; color:var(--ink-soft); margin:20px 0 12px;}
+  .new-since .card, .new-since .card.with-tab{margin-left:-1px; margin-right:-1px;}
+
   footer{margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
 """
 
@@ -119,7 +130,30 @@ def _delisted_note(reason: str | None) -> str:
     return f'<div class="delisted-note"><strong>Delisted/acquired:</strong> {html.escape(text)}</div>'
 
 
-def _render_biotech_card(row) -> str:
+def _notes_html(notes) -> str:
+    """Roadmap step 5 / brief section 8: personal notes per entry, written
+    via `signal-screener add-note` — this tool stays CLI-only for writing
+    (brief section 9: no accounts, no backend), the site is read-only."""
+    if not notes:
+        return ""
+    items = "".join(
+        f'<li><span class="note-date">{html.escape(n["date_written"])}</span> — {html.escape(n["note_text"])}</li>'
+        for n in notes
+    )
+    return f'<div class="notes"><span class="notes-label">Your notes:</span><ul>{items}</ul></div>'
+
+
+def _format_ts(iso_ts: str) -> str:
+    """"2026-08-13T14:22:01.123456+00:00" -> "2026-08-13 14:22 UTC" — used
+    only for the human-readable "since your last visit" timestamp; the raw
+    ISO string is what's actually compared against first_seen_at."""
+    try:
+        return datetime.fromisoformat(iso_ts).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return iso_ts
+
+
+def _render_biotech_card(row, notes=()) -> str:
     verified = bool(row["ticker_verified"])
     delisted = bool(row["delisted_or_acquired"])
     ticker_class = "ticker delisted" if delisted else ("ticker" if verified else "ticker unverified")
@@ -163,6 +197,7 @@ def _render_biotech_card(row) -> str:
         verify_html += _verify_note()
 
     delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
+    notes_html = _notes_html(notes)
 
     return f"""
   <div class="card with-tab">
@@ -177,6 +212,7 @@ def _render_biotech_card(row) -> str:
       {_flag_pill("Delisted/Acquired", "delisted") if delisted else ""}
       <div class="read">{read_text}</div>
       {delisted_html}
+      {notes_html}
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         {verify_html}
@@ -185,7 +221,7 @@ def _render_biotech_card(row) -> str:
   </div>"""
 
 
-def _render_founder_card(row, ownership) -> str:
+def _render_founder_card(row, ownership, notes=()) -> str:
     verified = bool(row["ticker_verified"])
     delisted = bool(row["delisted_or_acquired"])
     ticker_class = "ticker delisted" if delisted else ("ticker" if verified else "ticker unverified")
@@ -197,7 +233,10 @@ def _render_founder_card(row, ownership) -> str:
     ticker = html.escape(row["ticker"])
     exchange = html.escape(row["exchange"] or "")
     country = html.escape(row["country"] or "unknown")
+    network_effect_strength = row["network_effect_strength"]
     network_effect = html.escape(row["network_effect"] or "not identified in the source excerpt")
+    if network_effect_strength:
+        network_effect = f"[{html.escape(network_effect_strength)}] {network_effect}"
 
     if delisted:
         # founder_pipeline.py deliberately skips the filing/ownership fetch
@@ -238,6 +277,7 @@ def _render_founder_card(row, ownership) -> str:
         verify_html += _verify_note()
 
     delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
+    notes_html = _notes_html(notes)
 
     ticker_display = f"{exchange}: {ticker}" if exchange else ticker
 
@@ -252,6 +292,7 @@ def _render_founder_card(row, ownership) -> str:
       <div class="meta"><strong>HQ:</strong> {country} · <strong>Founder:</strong> {html.escape(row['founder_name'] or 'unknown')} · <strong>Network effect:</strong> {network_effect}</div>
       <div class="read">{read_text}</div>
       {delisted_html}
+      {notes_html}
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
@@ -260,9 +301,23 @@ def _render_founder_card(row, ownership) -> str:
   </div>"""
 
 
+def _is_new(row, previous_generated_at: str | None) -> bool:
+    """Roadmap step 5's diff mechanism: a row is "new since last visit" iff
+    it was first seen after the previous generate-site run. first_seen_at
+    is NULL for rows that predate that column (see db.py) and
+    previous_generated_at is None on the very first-ever run — both cases
+    correctly fall out of this as "not new" rather than needing a
+    special-cased comparison against NULL/None."""
+    return bool(row["first_seen_at"]) and previous_generated_at is not None and row["first_seen_at"] > previous_generated_at
+
+
 def build_site_html() -> str:
     db.init_db()
     with db.connect() as conn:
+        # Read before this run's generation overwrites it — this is the
+        # baseline the "New since last visit" section diffs against.
+        previous_generated_at = db.get_last_generated_at(conn)
+
         biotech_rows = conn.execute(
             """
             SELECT d.*, c.ticker_verified, c.delisted_or_acquired, c.ticker_verification_reason
@@ -275,7 +330,7 @@ def build_site_html() -> str:
         founder_rows = conn.execute(
             """
             SELECT * FROM companies
-            WHERE listing_type = 'ADR'
+            WHERE listing_type IN ('ADR', 'primary')
             ORDER BY
                 CASE founder_tier
                     WHEN 'Founder-CEO' THEN 0
@@ -287,6 +342,15 @@ def build_site_html() -> str:
             """
         ).fetchall()
 
+        # Render each row's card exactly once — the "New since last visit"
+        # section and the main section below it show the same card markup
+        # for a given row (same style, same verify links, same notes),
+        # never a simplified duplicate.
+        biotech_cards = []
+        for row in biotech_rows:
+            notes = db.get_notes_for_entry(conn, row["designation_id"])
+            biotech_cards.append((row, _render_biotech_card(row, notes)))
+
         founder_cards = []
         for row in founder_rows:
             ownership = conn.execute(
@@ -294,18 +358,48 @@ def build_site_html() -> str:
                 "ORDER BY as_of_date DESC, ownership_id DESC LIMIT 1",
                 (row["ticker"],),
             ).fetchone()
-            founder_cards.append(_render_founder_card(row, ownership))
+            notes = db.get_notes_for_entry(conn, row["ticker"])
+            founder_cards.append((row, _render_founder_card(row, ownership, notes)))
+
+        generated_at = db.now_iso()
+        db.set_last_generated_at(conn, generated_at)
 
     biotech_html = (
-        "".join(_render_biotech_card(r) for r in biotech_rows)
-        if biotech_rows
+        "".join(card_html for _, card_html in biotech_cards)
+        if biotech_cards
         else '<p class="sub">No biotech designations on file yet.</p>'
     )
     founder_html = (
-        "".join(founder_cards)
+        "".join(card_html for _, card_html in founder_cards)
         if founder_cards
         else '<p class="sub">No founder-led companies on file yet.</p>'
     )
+
+    new_biotech_html = "".join(
+        card_html for row, card_html in biotech_cards if _is_new(row, previous_generated_at)
+    )
+    new_founder_html = "".join(
+        card_html for row, card_html in founder_cards if _is_new(row, previous_generated_at)
+    )
+
+    if previous_generated_at is None:
+        new_since_body = (
+            '<p class="sub">This is the first generated snapshot — nothing to compare '
+            "against yet. The next run will show what's new since this one.</p>"
+        )
+    elif not new_biotech_html and not new_founder_html:
+        new_since_body = (
+            f'<p class="sub">Nothing new since your last visit '
+            f"({html.escape(_format_ts(previous_generated_at))}).</p>"
+        )
+    else:
+        new_since_body = (
+            f'<p class="sub">Since your last visit ({html.escape(_format_ts(previous_generated_at))}):</p>'
+            f'<h3 class="subsection-title">New biotech signals</h3>'
+            f'{new_biotech_html or "<p class=\"sub\">Nothing new here.</p>"}'
+            f'<h3 class="subsection-title">New founder-led companies</h3>'
+            f'{new_founder_html or "<p class=\"sub\">Nothing new here.</p>"}'
+        )
 
     generated = date.today().isoformat()
 
@@ -330,6 +424,11 @@ def build_site_html() -> str:
 
   <div class="banner">
     <b>How to validate this:</b> click "Verify" on each card — it goes straight to the source filing or trial record, not a paraphrase of one. Cards marked with a dashed, amber ticker failed independent verification (a second source didn't confirm the match) and are shown as-is rather than silently dropped or silently trusted. A solid purple ticker means something different: the match is very likely correct, but the company is confirmed no longer an active, tradable listing (acquired, delisted, gone private) — a real-world status change, not a matching failure. Nothing on this page is investment advice — confidence flags describe clinical/ownership facts, not buy or sell recommendations.
+  </div>
+
+  <h2 class="section-title">New since last visit</h2>
+  <div class="new-since">
+    {new_since_body}
   </div>
 
   <h2 class="section-title">Biotech signals</h2>

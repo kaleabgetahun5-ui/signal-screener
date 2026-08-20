@@ -20,7 +20,8 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from signal_screener import db
+from signal_screener import db, track_record
+from signal_screener.filings import germany
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
     fetch_filing_text,
@@ -30,6 +31,7 @@ from signal_screener.matching.resolve import resolve_ticker
 from signal_screener.matching.ticker_match import placeholder_ticker
 from signal_screener.models import Company, Ownership
 from signal_screener.sources.founder_led_tier1 import TIER1_CANDIDATES
+from signal_screener.sources.founder_led_tier2 import TIER2_CANDIDATES, Tier2Candidate
 from signal_screener.summarize.founder_extraction import extract_founder_status
 
 logger = logging.getLogger(__name__)
@@ -89,9 +91,205 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
     return founder_tier, None
 
 
+def _fetch_tier2_excerpt(candidate: Tier2Candidate) -> str:
+    """Dispatches to the country-specific filings/ module (see sources/
+    founder_led_tier2.py). Naver (KR), Tencent (HK), and Adyen (NL) add
+    branches here as their sources are built."""
+    if candidate.source_country_code == "DE":
+        return germany.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
+    raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
+
+
+def _tier2_source_citation(candidate: Tier2Candidate) -> str:
+    if candidate.source_country_code == "DE":
+        return f"DE:{germany.MANAGEMENT_BOARD_URLS[candidate.company_name]}"
+    raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
+
+
+def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
+    """Tier 2 (brief section 3): same match/verify/classify/store shape as
+    the Tier 1 loop in run() below, kept as a separate function rather
+    than unified with it — filing metadata (form/filing_date/exchange/
+    sector, all pulled straight from SEC EDGAR) doesn't have an equivalent
+    shape across arbitrary countries, and forcing one now would mean
+    guessing at a generalization ahead of having more than one real
+    country to generalize from. listing_type is "primary" here, not
+    "ADR" — see sources/founder_led_tier2.py."""
+    for candidate in TIER2_CANDIDATES:
+        match, verification = resolve_ticker(candidate.company_name)
+        if match is None:
+            logger.warning("No ticker match for company_name=%r", candidate.company_name)
+            ticker = placeholder_ticker(candidate.company_name)
+            db.upsert_company(
+                conn,
+                Company(
+                    ticker=ticker,
+                    company_name=candidate.company_name,
+                    country=candidate.country,
+                    founder_tier="N/A",
+                    listing_type="primary",
+                    ticker_verified=False,
+                    ticker_verification_source="none",
+                    ticker_verification_date=date.today().isoformat(),
+                    founder_name=candidate.founder_name,
+                ),
+            )
+            processed.append(ticker)
+            run_summary.unverified_tickers += 1
+            continue
+
+        if verification.delisted_or_acquired:
+            logger.warning(
+                "%s (%s) is delisted/acquired: %s",
+                match.ticker,
+                candidate.company_name,
+                verification.reason,
+            )
+            db.upsert_company(
+                conn,
+                Company(
+                    ticker=match.ticker,
+                    company_name=match.matched_company_name,
+                    country=candidate.country,
+                    founder_tier="N/A",
+                    listing_type="primary",
+                    ticker_verified=False,
+                    ticker_verification_source=verification.source,
+                    ticker_verification_date=verification.checked_date,
+                    ticker_verification_reason=verification.reason,
+                    ticker_match_confidence=match.confidence,
+                    founder_name=candidate.founder_name,
+                    exchange=candidate.exchange,
+                    delisted_or_acquired=True,
+                ),
+            )
+            processed.append(match.ticker)
+            run_summary.delisted_or_acquired += 1
+            continue
+
+        if not verification.verified:
+            logger.warning(
+                "Ticker verification failed for %s (%s): %s",
+                match.ticker,
+                candidate.company_name,
+                verification.reason,
+            )
+            run_summary.unverified_tickers += 1
+
+        try:
+            excerpt = _fetch_tier2_excerpt(candidate)
+        except Exception:
+            logger.exception("Leadership-page fetch failed for %s", match.ticker)
+            db.upsert_company(
+                conn,
+                Company(
+                    ticker=match.ticker,
+                    company_name=match.matched_company_name,
+                    country=candidate.country,
+                    founder_tier="N/A",
+                    listing_type="primary",
+                    ticker_verified=verification.verified,
+                    ticker_verification_source=verification.source,
+                    ticker_verification_date=verification.checked_date,
+                    ticker_verification_reason=verification.reason,
+                    ticker_match_confidence=match.confidence,
+                    founder_name=candidate.founder_name,
+                    exchange=candidate.exchange,
+                ),
+            )
+            processed.append(match.ticker)
+            run_summary.filing_lookup_failures += 1
+            continue
+
+        try:
+            extraction = extract_founder_status(
+                company_name=candidate.company_name, report_excerpt=excerpt
+            )
+        except Exception:
+            logger.exception("Founder extraction failed for %s", match.ticker)
+            db.upsert_company(
+                conn,
+                Company(
+                    ticker=match.ticker,
+                    company_name=match.matched_company_name,
+                    country=candidate.country,
+                    founder_tier="N/A",
+                    listing_type="primary",
+                    ticker_verified=verification.verified,
+                    ticker_verification_source=verification.source,
+                    ticker_verification_date=verification.checked_date,
+                    ticker_verification_reason=verification.reason,
+                    ticker_match_confidence=match.confidence,
+                    founder_name=candidate.founder_name,
+                    founder_tier_source=_tier2_source_citation(candidate),
+                    founder_tier_as_of_date=date.today().isoformat(),
+                    exchange=candidate.exchange,
+                ),
+            )
+            processed.append(match.ticker)
+            run_summary.extraction_failures += 1
+            continue
+
+        final_tier, override_reason = _apply_recency_rule(
+            extraction.founder_tier, extraction.transition_date
+        )
+        if override_reason:
+            logger.info("%s: %s", match.ticker, override_reason)
+
+        source_citation = _tier2_source_citation(candidate)
+        as_of = date.today().isoformat()
+
+        company = Company(
+            ticker=match.ticker,
+            company_name=match.matched_company_name,
+            country=candidate.country,
+            founder_tier=final_tier,
+            listing_type="primary",
+            ticker_verified=verification.verified,
+            ticker_verification_source=verification.source,
+            ticker_verification_date=verification.checked_date,
+            ticker_verification_reason=verification.reason,
+            ticker_match_confidence=match.confidence,
+            founder_name=candidate.founder_name,
+            network_effect=extraction.network_effect,
+            network_effect_strength=extraction.network_effect_strength,
+            founder_tier_source=source_citation,
+            founder_tier_as_of_date=as_of,
+            exchange=candidate.exchange,
+        )
+        db.upsert_company(conn, company)
+
+        db.insert_ownership(
+            conn,
+            Ownership(
+                ticker=match.ticker,
+                founder_name=candidate.founder_name,
+                role=extraction.leadership_status,
+                ownership_pct=extraction.ownership_pct_numeric,
+                source=source_citation,
+                as_of_date=as_of,
+            ),
+        )
+
+        founder_flag = track_record.derive_founder_flag(
+            final_tier, extraction.network_effect_strength
+        )
+        if founder_flag:
+            track_record.flag_entry(
+                conn,
+                entry_id=match.ticker,
+                entry_type="founder_stock",
+                ticker=match.ticker,
+                flag_given=founder_flag,
+            )
+
+        processed.append(match.ticker)
+
+
 def run() -> RunSummary:
-    """Runs the founder-led pipeline once. Returns a RunSummary (processed
-    tickers plus failure counts — see RunSummary.one_line())."""
+    """Runs the founder-led pipeline once (Tier 1 ADRs, then Tier 2
+    home-market-listed international companies). Returns a RunSummary
+    (processed tickers plus failure counts — see RunSummary.one_line())."""
     db.init_db()
     processed = []
     run_summary = RunSummary(processed_tickers=processed)
@@ -236,6 +434,7 @@ def run() -> RunSummary:
                 ticker_match_confidence=match.confidence,
                 founder_name=candidate.founder_name,
                 network_effect=extraction.network_effect,
+                network_effect_strength=extraction.network_effect_strength,
                 founder_tier_source=f"{filing.form}:{filing.document_url}",
                 founder_tier_as_of_date=filing.filing_date,
                 exchange=filing.exchange,
@@ -255,6 +454,25 @@ def run() -> RunSummary:
                 ),
             )
 
+            # Roadmap step 6: track record trigger (see track_record.py's
+            # derive_founder_flag for the rule). entry_id is the ticker —
+            # same convention user_notes already uses for founder-led
+            # entries, since a founder-led company doesn't have a separate
+            # designation_id-style identifier.
+            founder_flag = track_record.derive_founder_flag(
+                final_tier, extraction.network_effect_strength
+            )
+            if founder_flag:
+                track_record.flag_entry(
+                    conn,
+                    entry_id=match.ticker,
+                    entry_type="founder_stock",
+                    ticker=match.ticker,
+                    flag_given=founder_flag,
+                )
+
             processed.append(match.ticker)
+
+        _run_tier2(conn, run_summary, processed)
 
     return run_summary

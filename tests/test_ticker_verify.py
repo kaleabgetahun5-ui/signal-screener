@@ -43,6 +43,32 @@ def _no_sleep():
         yield
 
 
+def test_zalando_verifies_via_base_ticker_fallback_and_returns_resolved_ticker():
+    """Tier 2 international regression: a bare home-market ticker ("ZAL")
+    has no exact match on Yahoo, which only lists it exchange-suffixed
+    ("ZAL.DE"/"ZAL.HM"). The base (pre-".") match must still verify, and
+    report the real symbol via resolved_ticker so callers can use it."""
+    with patch.object(
+        ticker_verify.requests,
+        "get",
+        return_value=_yahoo_quotes(("ZAL.HM", "Zalando SE"), ("ZAL.DE", "Zalando SE")),
+    ):
+        result = verify_ticker("ZAL", "Zalando")
+    assert result.verified is True
+    assert result.resolved_ticker in ("ZAL.HM", "ZAL.DE")
+
+
+def test_exact_match_does_not_set_resolved_ticker():
+    """resolved_ticker should stay None for the common case (exact match) —
+    it only exists to signal "the ticker changed," not to always echo it."""
+    with patch.object(
+        ticker_verify.requests, "get", return_value=_yahoo_quotes(("PDD", "PDD Holdings Inc."))
+    ):
+        result = verify_ticker("PDD", "PDD Holdings")
+    assert result.verified is True
+    assert result.resolved_ticker is None
+
+
 def test_pdd_verifies_via_yahoo_when_yahoo_succeeds():
     with patch.object(
         ticker_verify.requests, "get", return_value=_yahoo_quotes(("PDD", "PDD Holdings Inc."))

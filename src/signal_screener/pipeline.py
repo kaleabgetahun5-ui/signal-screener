@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 
-from signal_screener import db
+from signal_screener import db, track_record
 from signal_screener.matching.resolve import resolve_ticker
 from signal_screener.matching.ticker_match import placeholder_ticker
 from signal_screener.models import Company, Designation
@@ -185,5 +185,21 @@ def run(*, generate_summaries: bool = True) -> RunSummary:
 
             db.upsert_designation(conn, designation)
             processed_ids.append(designation_id)
+
+            # Roadmap step 6: track record trigger. date_flagged is
+            # deliberately today, not raw.date_granted — the tracking
+            # clock starts when the pipeline first sees this flag, not
+            # whenever the underlying regulatory designation happened
+            # (which can be years in the past, e.g. Casgevy's 2020 PRIME
+            # grant — starting the clock there would mean the 3/6/12-month
+            # checkpoints are already overdue before tracking even begins).
+            if designation.summary_confidence_flag in track_record.TRACKABLE_BIOTECH_FLAGS:
+                track_record.flag_entry(
+                    conn,
+                    entry_id=designation_id,
+                    entry_type="designation",
+                    ticker=company.ticker,
+                    flag_given=designation.summary_confidence_flag,
+                )
 
     return run_summary

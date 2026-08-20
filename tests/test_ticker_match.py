@@ -154,6 +154,41 @@ def test_match_company_to_ticker_openfigi_prefers_us_composite_listing():
     assert match.ticker == "ESAIY"
 
 
+def test_match_company_to_ticker_openfigi_does_not_prefer_composite_for_non_us_listings():
+    """Regression case found live against Zalando (Tier 2, Germany): among
+    90+ "ZALANDO SE" listings, the clean home-market ticker "ZAL" never
+    happens to carry compositeFIGI == figi, but a currency-variant listing
+    ("ZAL1GBX") does. Trusting "composite" alone for a non-US company (the
+    prior version of this tie-break did) picked the GBX-denominated
+    listing over the real one — composite is only a meaningful signal
+    paired with exchCode "US" (see test above)."""
+    candidates = {
+        "data": [
+            {
+                "figi": "GBX1",
+                "name": "ZALANDO SE",
+                "ticker": "ZAL1GBX",
+                "exchCode": "EO",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "GBX1",  # composite, but not a US listing
+            },
+            {
+                "figi": "DE1",
+                "name": "ZALANDO SE",
+                "ticker": "ZAL",
+                "exchCode": "GY",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "DE1COMPOSITE",  # not composite
+            },
+        ]
+    }
+    with patch.object(ticker_match.requests, "post", return_value=_FakeResponse(candidates)):
+        match = match_company_to_ticker_openfigi("Zalando")
+    assert match.ticker == "ZAL"
+
+
 def test_match_company_to_ticker_openfigi_returns_none_below_threshold():
     candidates = {
         "data": [
@@ -235,6 +270,44 @@ def test_resolve_ticker_corrects_eisai_via_openfigi_fallback():
     assert match.ticker == "ESAIY"
     assert match.ticker != "HSAI"
     assert verification.verified is True
+
+
+def test_resolve_ticker_resolves_bare_ticker_to_exchange_suffixed_symbol():
+    """End-to-end golden case for Tier 2 international companies: SEC has
+    no match at all (foreign company), OpenFIGI returns a bare home-market
+    ticker ("ZAL"), and Yahoo only has it under an exchange-suffixed
+    symbol ("ZAL.DE") — resolve_ticker() must come back with that
+    suffixed symbol as match.ticker, not the bare guess nothing else in
+    the pipeline (site links, price fetches) can actually use."""
+    from signal_screener.matching import ticker_verify
+
+    openfigi_candidates = {
+        "data": [
+            {
+                "figi": "DE1",
+                "name": "ZALANDO SE",
+                "ticker": "ZAL",
+                "exchCode": "GY",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+            }
+        ]
+    }
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        if url == ticker_match.SEC_TICKERS_URL:
+            return _FakeResponse(SEC_FIXTURE)  # no Zalando entry -> SEC match is None
+        assert url == ticker_verify.YAHOO_SEARCH_URL
+        assert params["q"] == "ZAL"
+        return _yahoo_response_for({"ZAL.DE": "Zalando SE"})
+
+    with patch.object(ticker_match.requests, "get", side_effect=fake_get):
+        with patch.object(ticker_match.requests, "post", return_value=_FakeResponse(openfigi_candidates)):
+            match, verification = resolve_ticker("Zalando")
+
+    assert match.ticker == "ZAL.DE"
+    assert verification.verified is True
+    assert verification.resolved_ticker == "ZAL.DE"
 
 
 def test_resolve_ticker_flags_delisted_company_distinctly_not_unverified():

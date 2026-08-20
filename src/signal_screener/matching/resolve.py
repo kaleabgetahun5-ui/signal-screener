@@ -22,6 +22,21 @@ from signal_screener.matching.ticker_verify import (
 )
 
 
+def _apply_resolved_ticker(match: TickerMatch, verification: VerificationResult) -> TickerMatch:
+    """Substitutes in Yahoo's exchange-suffixed symbol (verify_ticker's
+    base-ticker fallback, Tier 2 international companies) so what's used
+    downstream — site links, track_record.py price fetches — is a ticker
+    those sources can actually resolve, not the bare guess OpenFIGI/
+    ticker_match.py returned."""
+    if verification.resolved_ticker and verification.resolved_ticker != match.ticker:
+        return TickerMatch(
+            ticker=verification.resolved_ticker,
+            matched_company_name=match.matched_company_name,
+            confidence=match.confidence,
+        )
+    return match
+
+
 def resolve_ticker(company_name: str) -> tuple[TickerMatch | None, VerificationResult | None]:
     """Returns (match, verification). match is None only if no source
     offered any candidate at all. verification is None only alongside a
@@ -34,13 +49,13 @@ def resolve_ticker(company_name: str) -> tuple[TickerMatch | None, VerificationR
     verification = verify_ticker(match.ticker, company_name) if match else None
 
     if match is not None and verification.verified:
-        return match, verification
+        return _apply_resolved_ticker(match, verification), verification
 
     fallback_match = match_company_to_ticker_openfigi(company_name)
     fallback_verification = verify_ticker(fallback_match.ticker, company_name) if fallback_match else None
 
     if fallback_match is not None and fallback_verification.verified:
-        return fallback_match, fallback_verification
+        return _apply_resolved_ticker(fallback_match, fallback_verification), fallback_verification
 
     # Neither source confirms an active, currently-tradable listing. Before
     # settling for a plain "unverified," check whether that's actually

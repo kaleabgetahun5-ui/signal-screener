@@ -58,6 +58,9 @@ jobs:
       - name: Run founder-led screener
         run: signal-screener run-founders -v
 
+      - name: Check due track-record outcomes (3/6/12mo)
+        run: signal-screener check-outcomes -v
+
       - name: Send weekly digest
         run: signal-screener digest -v
 

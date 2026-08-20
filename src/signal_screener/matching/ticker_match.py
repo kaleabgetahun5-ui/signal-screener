@@ -205,17 +205,25 @@ def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
     # results span many exchanges, and a short non-US listing code (e.g.
     # "EII" on exchCode "LU") can be shorter than the real US ADR ticker
     # ("ESAIY") it should lose to. Prefer exchCode "US" and the primary/
-    # composite record (compositeFIGI == figi) first — the two downstream
-    # verification sources (Yahoo, SEC EDGAR) are both US-centric, so a
-    # non-US listing can never actually get verified even when it's the
-    # right company.
+    # composite record (compositeFIGI == figi) first.
+    #
+    # compositeFIGI == figi is ONLY trusted as a signal when paired with
+    # exchCode "US" — a *Tier 2* regression found live against Zalando:
+    # among 90+ "ZALANDO SE" listings, the clean home-market ticker "ZAL"
+    # never happens to carry compositeFIGI == figi, but a currency-variant
+    # listing ("ZAL1GBX") does — trusting "composite" alone for a non-US
+    # company picked that GBX-denominated listing over the real one.
+    # OpenFIGI's "composite" grouping is a Bloomberg construct that doesn't
+    # reliably mean "primary home-market listing" outside the US, so
+    # non-US candidates fall straight through to the shortest-ticker
+    # tie-break instead of getting a composite-based mid-tier boost.
     best_score = max(score for _, score in scored)
     best_candidates = [c for c, score in scored if score == best_score]
 
     def _listing_priority(c: dict) -> tuple[int, int]:
         is_us = c.get("exchCode") == "US"
         is_composite = c.get("compositeFIGI") == c.get("figi")
-        rank = 0 if (is_us and is_composite) else 1 if is_us else 2 if is_composite else 3
+        rank = 0 if (is_us and is_composite) else 1 if is_us else 2
         return (rank, len(c["ticker"]))
 
     best = min(best_candidates, key=_listing_priority)

@@ -1,10 +1,11 @@
 import argparse
 import logging
+from datetime import date
 from pathlib import Path
 
 from signal_screener import db
 from signal_screener import digest as digest_module
-from signal_screener import founder_pipeline, pipeline, site
+from signal_screener import founder_pipeline, pipeline, site, track_record
 
 DEFAULT_DB_DUMP_PATH = "data/signal_screener.sql"
 
@@ -69,6 +70,24 @@ def main():
     )
     restore_parser.add_argument("-v", "--verbose", action="store_true")
 
+    note_parser = subparsers.add_parser(
+        "add-note",
+        help="Attach a personal note to a designation or company entry "
+        "(brief section 8 — CLI-only, no web form, no accounts)",
+    )
+    note_parser.add_argument(
+        "entry_id", help="A designation_id (biotech card) or ticker (founder-led card)"
+    )
+    note_parser.add_argument("note_text", help="The note text")
+    note_parser.add_argument("-v", "--verbose", action="store_true")
+
+    check_outcomes_parser = subparsers.add_parser(
+        "check-outcomes",
+        help="Fill in any due 3/6/12-month price checkpoints in tracked_outcomes "
+        "(roadmap step 6 — run this on the same schedule as the rest of the pipeline)",
+    )
+    check_outcomes_parser.add_argument("-v", "--verbose", action="store_true")
+
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -109,6 +128,23 @@ def main():
             print(f"Restored db from {in_path}")
         else:
             print(f"No dump at {in_path} — starting with a fresh db.")
+    elif args.command == "add-note":
+        db.init_db()
+        with db.connect() as conn:
+            if not db.entry_id_exists(conn, args.entry_id):
+                print(
+                    f"Warning: {args.entry_id!r} doesn't match any known "
+                    "designation_id or ticker — saving the note anyway."
+                )
+            db.insert_user_note(conn, args.entry_id, args.note_text, date.today().isoformat())
+        print(f"Note added to {args.entry_id}.")
+    elif args.command == "check-outcomes":
+        db.init_db()
+        with db.connect() as conn:
+            filled = track_record.check_due_outcomes(conn)
+        total = sum(filled.values())
+        breakdown = ", ".join(f"{n} at {cp}" for cp, n in filled.items())
+        print(f"{total} checkpoint(s) recorded: {breakdown}")
 
 
 if __name__ == "__main__":

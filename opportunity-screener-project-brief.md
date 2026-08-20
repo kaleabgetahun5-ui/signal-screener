@@ -134,16 +134,25 @@ Given this excerpt from {company_name}'s annual report or 20-F filing, extract:
    "Founder-departed" (neither of the above applies). If the transition 
    date isn't in this excerpt, say so explicitly rather than guessing 
    how recent it was.
-4. One sentence describing the company's core network effect, if one exists 
-   (e.g., more users → more value for each user), or "None identified" if 
-   the business model doesn't have one. Unlike items 1-3, this question is 
-   about the company's general business model, not something the leadership/
-   ownership excerpt itself will describe — answer it from general knowledge 
-   of the company, not from the excerpt. (This distinction matters: an 
-   earlier build of this prompt scoped item 4 to excerpt-only too, and it 
-   silently returned "None identified" for genuinely network-effect 
-   businesses like Sea Limited and Grab, simply because leadership/ownership 
-   sections never discuss business model.)
+4. Classify the company's network effect using exactly one of these three 
+   labels, per the defined criteria below — not a free-form judgment call — 
+   and write one sentence describing it (or explaining why none exists):
+   - **"Established"** — the network effect has operated at scale for 
+     multiple years and is central to the business model (e.g., a 
+     two-sided marketplace with real switching costs and evidence of 
+     compounding user growth).
+   - **"Emerging"** — a network effect exists per the business model but is 
+     newer or secondary to it.
+   - **"None identified"** — the business model doesn't have one.
+   
+   Unlike items 1-3, this question is about the company's general business 
+   model, not something the leadership/ownership excerpt itself will 
+   describe — answer it from general knowledge of the company, not from 
+   the excerpt. (This distinction matters: an earlier build of this prompt 
+   scoped item 4 to excerpt-only too, and it silently returned "None 
+   identified" for genuinely network-effect businesses like Sea Limited 
+   and Grab, simply because leadership/ownership sections never discuss 
+   business model.)
 
 Source text:
 {report_excerpt}
