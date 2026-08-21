@@ -103,7 +103,7 @@ CREATE TABLE site_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_generated_at TEXT
 );
-INSERT INTO "site_state" VALUES(1,'2026-08-20T13:41:45.597928+00:00');
+INSERT INTO "site_state" VALUES(1,'2026-08-20T22:29:07.785689+00:00');
 CREATE TABLE tracked_outcomes (
     outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_id TEXT NOT NULL UNIQUE,
