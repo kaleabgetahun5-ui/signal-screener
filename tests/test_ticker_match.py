@@ -15,6 +15,7 @@ from signal_screener.matching.resolve import resolve_ticker
 from signal_screener.matching.ticker_match import (
     match_company_to_ticker,
     match_company_to_ticker_openfigi,
+    match_company_to_ticker_openfigi_candidates,
 )
 
 # A small slice of SEC's real company_tickers.json, exact titles as SEC
@@ -189,6 +190,44 @@ def test_match_company_to_ticker_openfigi_does_not_prefer_composite_for_non_us_l
     assert match.ticker == "ZAL"
 
 
+def test_match_company_to_ticker_openfigi_candidates_ranks_dead_and_live_listings():
+    """Regression case found live against Naver: OpenFIGI flags both its
+    dead OTC ticker (NHNCF, delisted years ago) and its real, live Korea
+    Exchange ticker (035420) as exchCode "US"-vs-not with compositeFIGI ==
+    figi on *both* — the tie-break can't distinguish them from OpenFIGI's
+    metadata alone, so the fix is returning both, ranked, rather than
+    silently committing to whichever wins the tie-break (resolve_ticker
+    then tries each until one verifies — see the resolve_ticker test
+    below)."""
+    candidates = {
+        "data": [
+            {
+                "figi": "KR1",
+                "name": "NAVER CORP",
+                "ticker": "035420",
+                "exchCode": "KS",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "KR1",
+            },
+            {
+                "figi": "US1",
+                "name": "NAVER CORP",
+                "ticker": "NHNCF",
+                "exchCode": "US",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "US1",
+            },
+        ]
+    }
+    with patch.object(ticker_match.requests, "post", return_value=_FakeResponse(candidates)):
+        candidates_out = match_company_to_ticker_openfigi_candidates("Naver")
+    tickers = [c.ticker for c in candidates_out]
+    assert tickers == ["NHNCF", "035420"]  # US+composite still ranks first
+    assert match_company_to_ticker_openfigi("Naver").ticker == "NHNCF"  # single-guess wrapper unchanged
+
+
 def test_match_company_to_ticker_openfigi_returns_none_below_threshold():
     candidates = {
         "data": [
@@ -308,6 +347,61 @@ def test_resolve_ticker_resolves_bare_ticker_to_exchange_suffixed_symbol():
     assert match.ticker == "ZAL.DE"
     assert verification.verified is True
     assert verification.resolved_ticker == "ZAL.DE"
+
+
+def test_resolve_ticker_retries_second_openfigi_candidate_when_top_one_is_dead():
+    """End-to-end golden case for the Naver regression: OpenFIGI's top-
+    ranked candidate (NHNCF, a defunct US OTC registration) can't verify
+    on Yahoo at all — resolve_ticker() must fall through to the second
+    candidate (035420 -> Yahoo's "035420.KS") rather than concluding the
+    company is delisted/acquired just because the *first* guess was dead."""
+    from signal_screener.matching import ticker_verify
+
+    openfigi_candidates = {
+        "data": [
+            {
+                "figi": "US1",
+                "name": "NAVER CORP",
+                "ticker": "NHNCF",
+                "exchCode": "US",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "US1",
+            },
+            {
+                "figi": "KR1",
+                "name": "NAVER CORP",
+                "ticker": "035420",
+                "exchCode": "KS",
+                "securityType": "Common Stock",
+                "marketSector": "Equity",
+                "compositeFIGI": "KR1",
+            },
+        ]
+    }
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        if url == ticker_match.SEC_TICKERS_URL:
+            return _FakeResponse(SEC_FIXTURE)  # no Naver entry -> SEC match is None
+        if url == ticker_verify.YAHOO_SEARCH_URL:
+            if params["q"] == "NHNCF":
+                return _FakeResponse({"quotes": []})  # dead ticker, no listing
+            if params["q"] == "035420":
+                return _yahoo_response_for({"035420.KS": "NAVER Corp"})
+            return _FakeResponse({"quotes": []})
+        # NHNCF's verify_ticker falls through to the SEC EDGAR fallback
+        # before resolve_ticker moves on to the next OpenFIGI candidate.
+        assert url == ticker_verify.SEC_FULLTEXT_SEARCH_URL
+        return _FakeResponse({"hits": {"hits": []}})
+
+    with patch.object(ticker_match.requests, "get", side_effect=fake_get):
+        with patch.object(ticker_match.requests, "post", return_value=_FakeResponse(openfigi_candidates)):
+            match, verification = resolve_ticker("Naver")
+
+    assert match.ticker == "035420.KS"
+    assert match.ticker != "NHNCF"
+    assert verification.verified is True
+    assert verification.delisted_or_acquired is False
 
 
 def test_resolve_ticker_flags_delisted_company_distinctly_not_unverified():

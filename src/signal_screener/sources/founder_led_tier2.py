@@ -21,6 +21,13 @@ Candidates are added one country at a time as each source is actually
 built and verified live, not all at once from the brief's list — the same
 "expect manual curation early on, verify as you go" approach Tier 1's
 company_name-as-search-string pattern already established.
+
+South Korea (Naver): DART's structured data is keyed by name in Korean
+script (e.g. "이해진", not "Lee Hae-jin") — founder_name_local carries that
+for filings/korea.py's lookups, while founder_name stays the English
+rendering used for display everywhere else (site, digest). None of the
+other countries need this split (Germany's sources are already in Latin
+script), so it defaults to None and filings/germany.py never looks at it.
 """
 
 from dataclasses import dataclass
@@ -33,8 +40,12 @@ class Tier2Candidate:
     country: str
     exchange: str
     source_country_code: str  # dispatches to the matching filings/<country>.py module
+    founder_name_local: str | None = None  # see module docstring
 
 
 TIER2_CANDIDATES = [
     Tier2Candidate("Zalando", "Robert Gentz", "Germany", "XETRA", "DE"),
+    Tier2Candidate(
+        "Naver", "Lee Hae-jin", "South Korea", "KOSPI", "KR", founder_name_local="이해진"
+    ),
 ]

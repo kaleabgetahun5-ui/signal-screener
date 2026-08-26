@@ -13,7 +13,7 @@ second opinion on a match that's already confirmed.
 from signal_screener.matching.ticker_match import (
     TickerMatch,
     match_company_to_ticker,
-    match_company_to_ticker_openfigi,
+    match_company_to_ticker_openfigi_candidates,
 )
 from signal_screener.matching.ticker_verify import (
     VerificationResult,
@@ -51,11 +51,22 @@ def resolve_ticker(company_name: str) -> tuple[TickerMatch | None, VerificationR
     if match is not None and verification.verified:
         return _apply_resolved_ticker(match, verification), verification
 
-    fallback_match = match_company_to_ticker_openfigi(company_name)
-    fallback_verification = verify_ticker(fallback_match.ticker, company_name) if fallback_match else None
-
-    if fallback_match is not None and fallback_verification.verified:
-        return _apply_resolved_ticker(fallback_match, fallback_verification), fallback_verification
+    # Try every tied-top-score OpenFIGI candidate (capped, see
+    # MAX_OPENFIGI_CANDIDATES), not just the top-ranked one — a *Tier 2*
+    # regression found live against Naver: OpenFIGI's own ranking can't
+    # always tell a defunct US OTC registration from the real, live home-
+    # exchange listing (both scored identically on every signal the
+    # tie-break has), so the top guess isn't reliably the right one to
+    # commit to. The first candidate's own result is kept as the "best
+    # guess" fallback below if none of them verify.
+    fallback_candidates = match_company_to_ticker_openfigi_candidates(company_name)
+    fallback_match, fallback_verification = None, None
+    for i, candidate in enumerate(fallback_candidates):
+        candidate_verification = verify_ticker(candidate.ticker, company_name)
+        if i == 0:
+            fallback_match, fallback_verification = candidate, candidate_verification
+        if candidate_verification.verified:
+            return _apply_resolved_ticker(candidate, candidate_verification), candidate_verification
 
     # Neither source confirms an active, currently-tradable listing. Before
     # settling for a plain "unverified," check whether that's actually

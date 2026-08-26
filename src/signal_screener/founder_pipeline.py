@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from signal_screener import db, track_record
-from signal_screener.filings import germany
+from signal_screener.filings import germany, korea
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
     fetch_filing_text,
@@ -93,17 +93,45 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
 
 def _fetch_tier2_excerpt(candidate: Tier2Candidate) -> str:
     """Dispatches to the country-specific filings/ module (see sources/
-    founder_led_tier2.py). Naver (KR), Tencent (HK), and Adyen (NL) add
-    branches here as their sources are built."""
+    founder_led_tier2.py). Tencent (HK) and Adyen (NL) add branches here
+    as their sources are built."""
     if candidate.source_country_code == "DE":
         return germany.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
+    if candidate.source_country_code == "KR":
+        return korea.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name_local)
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
 
 
 def _tier2_source_citation(candidate: Tier2Candidate) -> str:
     if candidate.source_country_code == "DE":
         return f"DE:{germany.MANAGEMENT_BOARD_URLS[candidate.company_name]}"
+    if candidate.source_country_code == "KR":
+        return f"KR:DART exctvSttus corp_code={korea.CORP_CODES[candidate.company_name]}"
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
+
+
+def _effective_transition_date(candidate: Tier2Candidate, extraction_transition_date: str | None) -> str | None:
+    """Feeds _apply_recency_rule() the older (more conservative) of
+    Claude's own extracted transition_date and a real, filing-confirmed
+    anchor from a direct historical lookup — currently only Korea has one
+    (see filings/korea.py's check_role_predates_recency_window). A single
+    current-period excerpt has no "stepped back on X" sentence to find
+    for a transition that happened many years before the source's data
+    even starts (confirmed live: Naver's Lee Hae-jin already held his
+    current, non-CEO role as of DART's earliest available year), so
+    leaving this to Claude's excerpt-only inference would silently miss
+    it — same "verify with real data, don't infer" principle
+    check_delisted_or_acquired() (matching/ticker_verify.py) already
+    applies elsewhere in this pipeline."""
+    if candidate.source_country_code != "KR":
+        return extraction_transition_date
+
+    anchor = korea.check_role_predates_recency_window(candidate.company_name, candidate.founder_name_local)
+    if anchor is None:
+        return extraction_transition_date
+    if extraction_transition_date is None:
+        return anchor
+    return min(anchor, extraction_transition_date)
 
 
 def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
@@ -230,8 +258,9 @@ def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
             run_summary.extraction_failures += 1
             continue
 
+        effective_transition_date = _effective_transition_date(candidate, extraction.transition_date)
         final_tier, override_reason = _apply_recency_rule(
-            extraction.founder_tier, extraction.transition_date
+            extraction.founder_tier, effective_transition_date
         )
         if override_reason:
             logger.info("%s: %s", match.ticker, override_reason)

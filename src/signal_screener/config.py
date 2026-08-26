@@ -27,6 +27,13 @@ SEC_USER_AGENT = os.environ.get(
 # this is optional but recommended.
 OPENFIGI_API_KEY = os.environ.get("OPENFIGI_API_KEY")
 
+# Tier 2 (brief section 3), South Korea: filings/korea.py uses this for
+# DART's executive-status and major-shareholding endpoints. Free key,
+# sign up at https://opendart.fss.or.kr (Korean site; the key request form
+# is under "인증키 신청/관리" after registering). Required for any Tier 2
+# Korean candidate — unlike OpenFIGI, DART has no unauthenticated fallback.
+OPENDART_API_KEY = os.environ.get("OPENDART_API_KEY")
+
 ALLOWED_CONFIDENCE_FLAGS = ("High signal", "Moderate signal", "Early stage")
 
 # Weekly email digest (MVP roadmap step 4). SMTP rather than a provider API

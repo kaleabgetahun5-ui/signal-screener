@@ -35,6 +35,14 @@ OPENFIGI_SEARCH_URL = "https://api.openfigi.com/v3/search"
 # would otherwise dominate/pollute the candidate list.
 _OPENFIGI_EQUITY_SECURITY_TYPES = {"Common Stock", "REIT", "ADR", "Depositary Receipt"}
 
+# Bounds how many tied-top-score OpenFIGI candidates matching/resolve.py
+# will verify against Yahoo/SEC before giving up — a company with a wide
+# tied group (Eisai's real-data case had 70+) could otherwise mean dozens
+# of live verification calls, each with its own retry-with-backoff, in
+# the worst case. The right candidate has consistently ranked in the top
+# 2 in every real case found so far (Eisai, Zalando, Naver).
+MAX_OPENFIGI_CANDIDATES = 5
+
 
 def placeholder_ticker(company_name: str) -> str:
     """Stand-in ticker for a company with no verified match, so it stays
@@ -152,14 +160,34 @@ def match_company_to_ticker(company_name: str) -> TickerMatch | None:
 
 
 def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
+    """Best single guess — see match_company_to_ticker_openfigi_candidates()
+    for the full ranked list and why relying on just this one isn't always
+    enough (a top-ranked candidate can be a defunct listing that will
+    never verify, so matching/resolve.py retries down that full list
+    rather than giving up after this one)."""
+    candidates = match_company_to_ticker_openfigi_candidates(company_name)
+    return candidates[0] if candidates else None
+
+
+def match_company_to_ticker_openfigi_candidates(company_name: str) -> list[TickerMatch]:
     """Fallback matcher for companies match_company_to_ticker() can't place
     (not in SEC's US-filer list at all) or placed wrong (matched but failed
     ticker_verify.py's check) — see module docstring. Uses OpenFIGI's search
     API, which indexes global listings including OTC ADRs and delisted/
     acquired securities that SEC's file omits. Best-effort like its SEC
-    counterpart: returns its best guess plus a confidence score, never a
-    claim of certainty — matching/resolve.py still runs this through
-    ticker_verify.py before trusting it.
+    counterpart: returns every candidate that cleared MIN_MATCH_SCORE,
+    ranked best-first, never a claim of certainty — matching/resolve.py
+    still runs these through ticker_verify.py before trusting any of them.
+
+    Returning a ranked list rather than one pick matters in practice: a
+    *Tier 2* regression found live against Naver — OpenFIGI flags both its
+    dead OTC ticker (NHNCF, delisted years ago) and its real, live Korea
+    Exchange ticker (035420) as exchCode "US"-vs-not with compositeFIGI ==
+    figi on *both*, so the tie-break below genuinely cannot tell them
+    apart from OpenFIGI's metadata alone. The fix is at the call site,
+    not here: try the ranked candidates in order until one actually
+    verifies (resolve_ticker), instead of committing to the top guess and
+    concluding "must be delisted" when it happens to be the dead one.
     """
     headers = {"Content-Type": "application/json"}
     if OPENFIGI_API_KEY:
@@ -175,7 +203,7 @@ def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
         resp.raise_for_status()
         candidates = resp.json().get("data", [])
     except requests.RequestException:
-        return None
+        return []
 
     equity_candidates = [
         c
@@ -186,7 +214,7 @@ def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
         and c.get("name")
     ]
     if not equity_candidates:
-        return None
+        return []
 
     scored = [
         (c, fuzz.token_sort_ratio(company_name, c["name"], processor=_normalize_for_matching))
@@ -194,7 +222,7 @@ def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
     ]
     scored = [(c, score) for c, score in scored if score >= MIN_MATCH_SCORE]
     if not scored:
-        return None
+        return []
 
     # Tie-break toward the primary US listing when the top score is shared —
     # a foreign issuer's GDR/secondary listing scores identically to its US
@@ -226,6 +254,9 @@ def match_company_to_ticker_openfigi(company_name: str) -> TickerMatch | None:
         rank = 0 if (is_us and is_composite) else 1 if is_us else 2
         return (rank, len(c["ticker"]))
 
-    best = min(best_candidates, key=_listing_priority)
+    ranked = sorted(best_candidates, key=_listing_priority)[:MAX_OPENFIGI_CANDIDATES]
 
-    return TickerMatch(ticker=best["ticker"], matched_company_name=best["name"], confidence=best_score)
+    return [
+        TickerMatch(ticker=c["ticker"], matched_company_name=c["name"], confidence=best_score)
+        for c in ranked
+    ]
