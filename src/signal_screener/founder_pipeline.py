@@ -21,14 +21,15 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from signal_screener import db, track_record
-from signal_screener.filings import germany, korea
+from signal_screener.filings import germany, hongkong, korea
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
     fetch_filing_text,
     get_latest_annual_filing,
 )
 from signal_screener.matching.resolve import resolve_ticker
-from signal_screener.matching.ticker_match import placeholder_ticker
+from signal_screener.matching.ticker_match import TickerMatch, placeholder_ticker
+from signal_screener.matching.ticker_verify import VerificationResult, verify_ticker
 from signal_screener.models import Company, Ownership
 from signal_screener.sources.founder_led_tier1 import TIER1_CANDIDATES
 from signal_screener.sources.founder_led_tier2 import TIER2_CANDIDATES, Tier2Candidate
@@ -93,12 +94,14 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
 
 def _fetch_tier2_excerpt(candidate: Tier2Candidate) -> str:
     """Dispatches to the country-specific filings/ module (see sources/
-    founder_led_tier2.py). Tencent (HK) and Adyen (NL) add branches here
-    as their sources are built."""
+    founder_led_tier2.py). Adyen (NL) adds a branch here as its source is
+    built."""
     if candidate.source_country_code == "DE":
         return germany.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
     if candidate.source_country_code == "KR":
         return korea.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name_local)
+    if candidate.source_country_code == "HK":
+        return hongkong.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
 
 
@@ -107,7 +110,39 @@ def _tier2_source_citation(candidate: Tier2Candidate) -> str:
         return f"DE:{germany.MANAGEMENT_BOARD_URLS[candidate.company_name]}"
     if candidate.source_country_code == "KR":
         return f"KR:DART exctvSttus corp_code={korea.CORP_CODES[candidate.company_name]}"
+    if candidate.source_country_code == "HK":
+        return f"HK:{hongkong.BOARD_MEMBERS_URLS[candidate.company_name]}"
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
+
+
+def _resolve_tier2_ticker(candidate: Tier2Candidate) -> tuple[TickerMatch | None, VerificationResult | None]:
+    """Tries candidate.known_ticker first, if set — still run through the
+    same mandatory verify_ticker() check as everything else, never trusted
+    just because it's hardcoded. Falls through to the general fuzzy-match
+    dance (resolve_ticker) if there's no hint, or the hint doesn't verify
+    (e.g. the company changed its primary listing since this was written).
+
+    Exists because resolve_ticker()'s OpenFIGI tie-break has no concept of
+    "which listing is this Tier 2 candidate's actual home market" — found
+    live against Tencent: OpenFIGI ranks a thinly-traded US OTC ticker
+    (TCTZF) above the real, liquid HKEX listing (0700.HK) because both
+    verify and nothing in that tie-break favors one home exchange over
+    another. That's a real accuracy problem, not a cosmetic one —
+    track_record.py prices off of whatever ticker ends up here, and OTC
+    pink-sheet pricing can be stale/illiquid next to the actual home-
+    exchange price."""
+    if candidate.known_ticker:
+        hint_verification = verify_ticker(candidate.known_ticker, candidate.company_name)
+        if hint_verification.verified:
+            return (
+                TickerMatch(
+                    ticker=candidate.known_ticker,
+                    matched_company_name=candidate.company_name,
+                    confidence=100.0,
+                ),
+                hint_verification,
+            )
+    return resolve_ticker(candidate.company_name)
 
 
 def _effective_transition_date(candidate: Tier2Candidate, extraction_transition_date: str | None) -> str | None:
@@ -144,7 +179,7 @@ def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
     country to generalize from. listing_type is "primary" here, not
     "ADR" — see sources/founder_led_tier2.py."""
     for candidate in TIER2_CANDIDATES:
-        match, verification = resolve_ticker(candidate.company_name)
+        match, verification = _resolve_tier2_ticker(candidate)
         if match is None:
             logger.warning("No ticker match for company_name=%r", candidate.company_name)
             ticker = placeholder_ticker(candidate.company_name)

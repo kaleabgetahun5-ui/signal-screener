@@ -28,6 +28,30 @@ for filings/korea.py's lookups, while founder_name stays the English
 rendering used for display everywhere else (site, digest). None of the
 other countries need this split (Germany's sources are already in Latin
 script), so it defaults to None and filings/germany.py never looks at it.
+
+Hong Kong (Tencent): the brief's stated source, HKEX's Disclosure of
+Interests system (di.hkex.com.hk), is real but sits behind active bot
+protection (an Akamai JS challenge, confirmed live — a plain HTTP client
+gets an infinite redirect loop, never the actual search results). No
+scraping workaround for that here; filings/hongkong.py falls back to
+Tencent's own investor-relations board page for leadership (reliably
+static — real content confirmed live) and documents the ownership-%
+gap explicitly rather than silently guessing (same "not disclosed in
+this excerpt" honesty as Zalando/Naver's threshold-register gaps, just
+with a different cause: blocked access, not a genuine absence of
+disclosure).
+
+known_ticker: an optional pre-verified ticker hint, tried before the
+general fuzzy-match dance (resolve_ticker) — still run through the same
+mandatory verify_ticker() check, never trusted blindly. Added for
+Tencent specifically: OpenFIGI's own ranking put a thinly-traded US OTC
+ticker (TCTZF) ahead of the real, liquid HKEX primary listing (0700.HK)
+because both verify and the tie-break has no way to know HKEX is the
+"real" one — a bigger accuracy issue than it sounds, since
+track_record.py prices off of whatever ticker ends up here, and OTC
+pink-sheet pricing for a name like this can be stale/illiquid next to
+its actual home-exchange price. Left unset for Zalando/Naver, which
+already resolve correctly without it.
 """
 
 from dataclasses import dataclass
@@ -41,11 +65,15 @@ class Tier2Candidate:
     exchange: str
     source_country_code: str  # dispatches to the matching filings/<country>.py module
     founder_name_local: str | None = None  # see module docstring
+    known_ticker: str | None = None  # see module docstring
 
 
 TIER2_CANDIDATES = [
     Tier2Candidate("Zalando", "Robert Gentz", "Germany", "XETRA", "DE"),
     Tier2Candidate(
         "Naver", "Lee Hae-jin", "South Korea", "KOSPI", "KR", founder_name_local="이해진"
+    ),
+    Tier2Candidate(
+        "Tencent Holdings", "Ma Huateng (Pony Ma)", "Hong Kong", "HKEX", "HK", known_ticker="0700.HK"
     ),
 ]
