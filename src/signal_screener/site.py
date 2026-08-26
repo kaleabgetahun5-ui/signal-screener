@@ -393,12 +393,17 @@ def build_site_html() -> str:
             f"({html.escape(_format_ts(previous_generated_at))}).</p>"
         )
     else:
+        # Pulled out of the f-string below rather than inlined with escaped
+        # quotes: a backslash inside an f-string's {} expression part is a
+        # SyntaxError before Python 3.12 (PEP 701 lifted that restriction),
+        # and this project targets 3.11 (pyproject.toml, CI).
+        nothing_new_here = '<p class="sub">Nothing new here.</p>'
         new_since_body = (
             f'<p class="sub">Since your last visit ({html.escape(_format_ts(previous_generated_at))}):</p>'
             f'<h3 class="subsection-title">New biotech signals</h3>'
-            f'{new_biotech_html or "<p class=\"sub\">Nothing new here.</p>"}'
+            f'{new_biotech_html or nothing_new_here}'
             f'<h3 class="subsection-title">New founder-led companies</h3>'
-            f'{new_founder_html or "<p class=\"sub\">Nothing new here.</p>"}'
+            f'{new_founder_html or nothing_new_here}'
         )
 
     generated = date.today().isoformat()
