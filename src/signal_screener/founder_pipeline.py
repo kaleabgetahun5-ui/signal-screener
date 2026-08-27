@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from signal_screener import db, track_record
-from signal_screener.filings import germany, hongkong, korea
+from signal_screener.filings import germany, hongkong, korea, netherlands
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
     fetch_filing_text,
@@ -94,14 +94,15 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
 
 def _fetch_tier2_excerpt(candidate: Tier2Candidate) -> str:
     """Dispatches to the country-specific filings/ module (see sources/
-    founder_led_tier2.py). Adyen (NL) adds a branch here as its source is
-    built."""
+    founder_led_tier2.py)."""
     if candidate.source_country_code == "DE":
         return germany.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
     if candidate.source_country_code == "KR":
         return korea.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name_local)
     if candidate.source_country_code == "HK":
         return hongkong.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
+    if candidate.source_country_code == "NL":
+        return netherlands.fetch_leadership_excerpt(candidate.company_name, candidate.founder_name)
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
 
 
@@ -112,6 +113,8 @@ def _tier2_source_citation(candidate: Tier2Candidate) -> str:
         return f"KR:DART exctvSttus corp_code={korea.CORP_CODES[candidate.company_name]}"
     if candidate.source_country_code == "HK":
         return f"HK:{hongkong.BOARD_MEMBERS_URLS[candidate.company_name]}"
+    if candidate.source_country_code == "NL":
+        return f"NL:{netherlands.GOVERNANCE_URLS[candidate.company_name]}"
     raise NotImplementedError(f"No Tier 2 source wired up for country code {candidate.source_country_code!r}")
 
 

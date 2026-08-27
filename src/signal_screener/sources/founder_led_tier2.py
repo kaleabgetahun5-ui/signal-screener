@@ -51,7 +51,15 @@ because both verify and the tie-break has no way to know HKEX is the
 track_record.py prices off of whatever ticker ends up here, and OTC
 pink-sheet pricing for a name like this can be stale/illiquid next to
 its actual home-exchange price. Left unset for Zalando/Naver, which
-already resolve correctly without it.
+already resolve correctly without it. The same OTC-ticker trap hit
+Adyen too (resolves to ADYYF over the real Euronext Amsterdam listing,
+ADYEN.AS) — confirmed live, same fix.
+
+Netherlands (Adyen): only Pieter van der Does (Co-Founder & Co-CEO) is
+tracked. Co-founder Arnout Schuijff stepped down from the management
+board on 2021-01-01 and left the company entirely — see
+filings/netherlands.py for the source confirming that and why there's
+no "current role" left for him to classify.
 """
 
 from dataclasses import dataclass
@@ -75,5 +83,9 @@ TIER2_CANDIDATES = [
     ),
     Tier2Candidate(
         "Tencent Holdings", "Ma Huateng (Pony Ma)", "Hong Kong", "HKEX", "HK", known_ticker="0700.HK"
+    ),
+    Tier2Candidate(
+        "Adyen", "Pieter van der Does", "Netherlands", "Euronext Amsterdam", "NL",
+        known_ticker="ADYEN.AS",
     ),
 ]
