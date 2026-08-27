@@ -70,6 +70,71 @@ def test_build_site_html_diff_view_across_three_generations(tmp_path, monkeypatc
     assert html_3.count("Test Drug") == 1
 
 
+def test_delisted_biotech_entries_render_in_archive_not_main_section(tmp_path, monkeypatch):
+    """A delisted/acquired biotech designation moves to the "Archive"
+    section instead of the main "Biotech signals" list — same card
+    markup, just partitioned by companies.delisted_or_acquired. An active
+    entry does the reverse: main section only, never the archive."""
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company, Designation
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="DEAD",
+                company_name="Delisted Co",
+                ticker_verified=False,
+                delisted_or_acquired=True,
+                ticker_verification_reason="confirmed delisted for testing",
+            ),
+        )
+        db.upsert_designation(
+            conn,
+            Designation(
+                designation_id="dead123",
+                ticker="DEAD",
+                source="FDA",
+                type="Breakthrough Therapy",
+                date_granted="2020-01-01",
+                drug_name="Archived Drug",
+                indication="Test indication",
+                trial_id=None,
+                data_source="unit_test",
+                data_as_of_date="2020-01-01",
+                raw_company_name="Delisted Co",
+            ),
+        )
+        db.upsert_company(conn, Company(ticker="LIVE", company_name="Live Co", ticker_verified=True))
+        db.upsert_designation(
+            conn,
+            Designation(
+                designation_id="live123",
+                ticker="LIVE",
+                source="FDA",
+                type="Breakthrough Therapy",
+                date_granted="2026-01-01",
+                drug_name="Active Drug",
+                indication="Test indication",
+                trial_id=None,
+                data_source="unit_test",
+                data_as_of_date="2026-01-01",
+                raw_company_name="Live Co",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    archive_section, _, rest = html_out.partition('Founder-led companies</h2>')
+    biotech_section, _, archive_only = archive_section.partition("Archive — delisted")
+
+    assert "Archived Drug" not in biotech_section
+    assert "Archived Drug" in archive_only
+    assert "Active Drug" in biotech_section
+    assert "Active Drug" not in archive_only
+
+
 def test_notes_render_on_biotech_card(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")

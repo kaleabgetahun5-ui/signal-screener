@@ -22,6 +22,15 @@ and a verify link to the real ClinicalTrials.gov record. For founder-led
 entries, the founder tier, the real ownership percentage and role sentence
 pulled from the actual SEC filing, and a verify link straight to that
 filing on sec.gov.
+
+Delisted/acquired biotech entries (companies.delisted_or_acquired) render
+in a dedicated "Archive" section rather than inline in "Biotech signals" —
+same card markup either way, just moved out of the section meant to
+answer "what's currently worth a look" once the underlying company is
+confirmed no longer an active, tradable listing. The designation record
+itself is real and kept, not dropped, since the clinical fact (the
+Breakthrough Therapy/PRIME designation) doesn't stop being true just
+because the company's listing status changed.
 """
 
 import html
@@ -405,10 +414,31 @@ def build_site_html() -> str:
         generated_at = db.now_iso()
         db.set_last_generated_at(conn, generated_at)
 
+    # Delisted/acquired biotech entries move to their own "Archive"
+    # section below rather than rendering inline — the main section is
+    # meant to answer "what's currently worth a look," and a delisted/
+    # acquired listing (see _delisted_note) isn't that anymore even
+    # though the underlying designation record is still real and worth
+    # keeping. Same card markup either way (_render_biotech_card), just
+    # partitioned by companies.delisted_or_acquired — never a simplified
+    # or re-derived version of the card for the archive.
+    active_biotech_cards = [
+        (row, card_html) for row, card_html in biotech_cards if not row["delisted_or_acquired"]
+    ]
+    archived_biotech_cards = [
+        (row, card_html) for row, card_html in biotech_cards if row["delisted_or_acquired"]
+    ]
+
     biotech_html = (
-        "".join(card_html for _, card_html in biotech_cards)
-        if biotech_cards
-        else '<p class="sub">No biotech designations on file yet.</p>'
+        "".join(card_html for _, card_html in active_biotech_cards)
+        if active_biotech_cards
+        else '<p class="sub">No active biotech designations on file yet.</p>'
+    )
+    archive_html = (
+        "".join(card_html for _, card_html in archived_biotech_cards)
+        if archived_biotech_cards
+        else '<p class="sub">Nothing archived yet — this fills in as designations '
+        "get confirmed delisted/acquired.</p>"
     )
     founder_html = (
         "".join(card_html for _, card_html in founder_cards)
@@ -528,6 +558,10 @@ def build_site_html() -> str:
 
   <h2 class="section-title">Biotech signals</h2>
   {biotech_html}
+
+  <h2 class="section-title">Archive — delisted / acquired</h2>
+  <div class="sub" style="margin-bottom:18px;">Biotech designations whose company is confirmed no longer an active, tradable listing (see the banner above) — moved out of the main section above so it stays focused on what's currently live, without dropping the underlying designation record.</div>
+  {archive_html}
 
   <h2 class="section-title">Founder-led companies</h2>
   {founder_html}
