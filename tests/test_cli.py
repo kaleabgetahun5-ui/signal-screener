@@ -85,12 +85,21 @@ def test_watchlist_add_remove_list_roundtrip(tmp_path, monkeypatch, capsys):
     assert "Your watchlist is empty." in out
 
 
-def test_watchlist_add_warns_on_unknown_entry_id(tmp_path, monkeypatch, capsys):
+def test_watchlist_add_rejects_unscreened_entry_id(tmp_path, monkeypatch, capsys):
+    """Unlike add-note, watchlist-add refuses an entry_id that hasn't been
+    screened by the pipeline yet — an arbitrary outside ticker must never
+    end up starred, since site.py/digest.py's watchlist section would
+    otherwise just silently drop it with no indication anything failed."""
     cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
 
     monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-add", "NOTATICKER"])
     cli.main()
 
     out = capsys.readouterr().out
-    assert "Warning" in out
-    assert "Added NOTATICKER to your watchlist." in out
+    assert "not adding it" in out
+    assert "Added" not in out
+
+    db.init_db()
+    with db.connect() as conn:
+        assert db.get_watchlist_entry_ids(conn) == set()

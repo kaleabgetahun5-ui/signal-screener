@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS tracked_outcomes (
 -- no boolean column, added/removed via signal-screener watchlist-add /
 -- watchlist-remove (CLI-only, same as add-note — brief section 9: no
 -- accounts, no web form).
+--
+-- Unlike user_notes, only already-screened entries may go in this table
+-- — cli.py's watchlist-add rejects (not just warns on, per add-note's
+-- looser rule) an entry_id that doesn't already exist in companies/
+-- designations. This table has no FOREIGN KEY of its own enforcing that
+-- (entry_id spans two tables, same reason user_notes doesn't have one
+-- either), so it relies entirely on that CLI-layer check — nothing here
+-- stops a caller that skips it from inserting a dangling entry_id that
+-- site.py/digest.py's watchlist section would then just silently never
+-- render.
 CREATE TABLE IF NOT EXISTS watchlist (
     entry_id TEXT PRIMARY KEY,
     added_at TEXT NOT NULL

@@ -83,11 +83,14 @@ def main():
 
     watchlist_add_parser = subparsers.add_parser(
         "watchlist-add",
-        help="Star a designation or company entry on your personal watchlist "
-        "(shown in its own section on the site and in the digest)",
+        help="Star an already-screened designation or company entry on your personal "
+        "watchlist (shown in its own section on the site and in the digest) — rejects "
+        "an entry_id that isn't already in the pipeline",
     )
     watchlist_add_parser.add_argument(
-        "entry_id", help="A designation_id (biotech card) or ticker (founder-led card)"
+        "entry_id",
+        help="A designation_id (biotech card) or ticker (founder-led card) that has "
+        "already been screened — not an arbitrary outside ticker",
     )
     watchlist_add_parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -160,18 +163,31 @@ def main():
             db.insert_user_note(conn, args.entry_id, args.note_text, date.today().isoformat())
         print(f"Note added to {args.entry_id}.")
     elif args.command == "watchlist-add":
+        # Unlike add-note (which allows a note for an entry_id that doesn't
+        # exist yet — see its own comment), this rejects outright: the
+        # watchlist only stars entries that have already been screened by
+        # the pipeline (ticker-verified biotech designations / founder-led
+        # companies), never an arbitrary outside ticker. An unscreened
+        # entry_id would otherwise sit invisibly in the table forever —
+        # site.py/digest.py's watchlist section only ever renders rows that
+        # already exist in companies/designations, so a typo'd or
+        # never-screened entry_id would just silently never show up
+        # anywhere, with no indication anything was dropped.
         db.init_db()
         with db.connect() as conn:
             if not db.entry_id_exists(conn, args.entry_id):
                 print(
-                    f"Warning: {args.entry_id!r} doesn't match any known "
-                    "designation_id or ticker — starring it anyway."
+                    f"{args.entry_id!r} doesn't match any known designation_id "
+                    "or ticker currently in the pipeline — not adding it. The "
+                    "watchlist only stars already-screened entries, not "
+                    "arbitrary outside tickers."
                 )
-            added = db.add_to_watchlist(conn, args.entry_id, date.today().isoformat())
-        if added:
-            print(f"Added {args.entry_id} to your watchlist.")
-        else:
-            print(f"{args.entry_id} was already on your watchlist.")
+            else:
+                added = db.add_to_watchlist(conn, args.entry_id, date.today().isoformat())
+                if added:
+                    print(f"Added {args.entry_id} to your watchlist.")
+                else:
+                    print(f"{args.entry_id} was already on your watchlist.")
     elif args.command == "watchlist-remove":
         db.init_db()
         with db.connect() as conn:
