@@ -224,3 +224,37 @@ def test_watchlist_add_remove_and_list(tmp_path, monkeypatch):
         # Removing something not on the watchlist is reported, not silent.
         removed_again = db.remove_from_watchlist(conn, "TEST")
         assert removed_again is False
+
+
+def test_watchlist_arbitrary_entries_stored_and_scoped_separately(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+
+    db.init_db()
+    with db.connect() as conn:
+        db.add_to_watchlist(conn, "TEST", "2026-08-27")  # pipeline, default kind
+        db.add_to_watchlist(
+            conn,
+            "AAPL",
+            "2026-08-27",
+            entry_kind="arbitrary",
+            company_name="Apple Inc.",
+            verification_source="yahoo_finance_search",
+            verification_date="2026-08-27",
+            verification_reason="resolved 'aapl' to 'AAPL' ('Apple Inc.')",
+        )
+
+    with db.connect() as conn:
+        # Pipeline-only set used to filter companies/designations rows —
+        # the arbitrary entry has no row there and must not appear here.
+        assert db.get_watchlist_entry_ids(conn) == {"TEST"}
+
+        arbitrary_rows = db.get_arbitrary_watchlist_rows(conn)
+        assert len(arbitrary_rows) == 1
+        assert arbitrary_rows[0]["entry_id"] == "AAPL"
+        assert arbitrary_rows[0]["company_name"] == "Apple Inc."
+        assert arbitrary_rows[0]["verification_source"] == "yahoo_finance_search"
+
+        all_rows = db.list_watchlist(conn)
+        kinds = {r["entry_id"]: r["entry_kind"] for r in all_rows}
+        assert kinds == {"TEST": "pipeline", "AAPL": "arbitrary"}

@@ -55,6 +55,7 @@ CSS = """
     --early:#5B6B7A; --early-bg:#E9EDF0;
     --verify:#9C6B1F;
     --delisted:#5B3A8E; --delisted-bg:#EEE7F7;
+    --arbitrary:#1C5D8C; --arbitrary-bg:#E3EEF7;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
@@ -89,6 +90,10 @@ CSS = """
   .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
   .flag.early{background:var(--early-bg); color:var(--early);}
   .flag.delisted{background:var(--delisted-bg); color:var(--delisted);}
+  .flag.arbitrary{background:var(--arbitrary-bg); color:var(--arbitrary);}
+
+  .card.arbitrary{border-style:dashed; border-color:var(--arbitrary);}
+  .card.arbitrary .ticker{border-color:var(--arbitrary); color:var(--arbitrary);}
 
   .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:16px;}
 
@@ -301,6 +306,40 @@ def _render_founder_card(row, ownership, notes=()) -> str:
   </div>"""
 
 
+def _render_arbitrary_watchlist_card(row) -> str:
+    """A self-added ticker (db.watchlist, entry_kind='arbitrary') has no
+    row in companies — it was never run through the founder-led/biotech
+    screening pipeline at all, only independently verified to exist as a
+    real, currently listed security (matching/ticker_verify.py's
+    resolve_arbitrary_ticker) at the moment it was added. Deliberately
+    styled and worded to look different from a screened card (dashed
+    blue border, "Self-added" flag instead of a tier/confidence pill, no
+    founder/network-effect claims) — this project's guardrail against
+    ever presenting unscreened data as if it were screened."""
+    ticker = html.escape(row["entry_id"])
+    name = html.escape(row["company_name"] or ticker)
+    source = html.escape(row["verification_source"] or "unknown source")
+    verified_date = html.escape(row["verification_date"] or "unknown date")
+    reason = html.escape(row["verification_reason"] or "")
+
+    return f"""
+  <div class="card arbitrary">
+    <div class="card-head">
+      <div class="top-row">
+        <div class="company-name">{name}</div>
+        <div class="ticker">{ticker}</div>
+      </div>
+      {_flag_pill("Self-added — not screened", "arbitrary")}
+      <div class="meta"><strong>Added by you:</strong> {html.escape(row['added_at'])} · <strong>Existence verified via:</strong> {source} ({verified_date})</div>
+      <div class="read">{reason}</div>
+    </div>
+    <div class="verify-row">
+      <span class="verify-label">Verify:</span>
+      <a href="https://finance.yahoo.com/quote/{ticker}" target="_blank" rel="noopener">Current price</a>
+    </div>
+  </div>"""
+
+
 def _is_new(row, previous_generated_at: str | None) -> bool:
     """Roadmap step 5's diff mechanism: a row is "new since last visit" iff
     it was first seen after the previous generate-site run. first_seen_at
@@ -318,6 +357,7 @@ def build_site_html() -> str:
         # baseline the "New since last visit" section diffs against.
         previous_generated_at = db.get_last_generated_at(conn)
         watchlist_ids = db.get_watchlist_entry_ids(conn)
+        arbitrary_watchlist_rows = db.get_arbitrary_watchlist_rows(conn)
 
         biotech_rows = conn.execute(
             """
@@ -389,6 +429,9 @@ def build_site_html() -> str:
     watchlist_founder_html = "".join(
         card_html for row, card_html in founder_cards if row["ticker"] in watchlist_ids
     )
+    watchlist_arbitrary_html = "".join(
+        _render_arbitrary_watchlist_card(row) for row in arbitrary_watchlist_rows
+    )
 
     if previous_generated_at is None:
         new_since_body = (
@@ -414,14 +457,18 @@ def build_site_html() -> str:
             f'{new_founder_html or nothing_new_here}'
         )
 
-    if not watchlist_ids:
+    has_any_watchlist_content = (
+        watchlist_biotech_html or watchlist_founder_html or watchlist_arbitrary_html
+    )
+    if not watchlist_ids and not arbitrary_watchlist_rows:
         watchlist_body = (
-            '<p class="sub">Your watchlist is empty. Star an entry with '
-            "<code>signal-screener watchlist-add &lt;entry_id&gt;</code> — a "
-            "designation_id (biotech card) or ticker (founder-led card) — to see it "
-            "here.</p>"
+            '<p class="sub">Your watchlist is empty. Star an already-screened entry '
+            "or add an outside ticker with <code>signal-screener watchlist-add "
+            "&lt;entry_id&gt;</code> — a designation_id, a founder-led/biotech ticker, "
+            "or any other ticker (verified against Yahoo/SEC before being accepted) "
+            "— to see it here.</p>"
         )
-    elif not watchlist_biotech_html and not watchlist_founder_html:
+    elif not has_any_watchlist_content:
         watchlist_body = (
             '<p class="sub">Nothing on your watchlist is currently in the pipeline '
             "(it may have since been removed).</p>"
@@ -434,6 +481,15 @@ def build_site_html() -> str:
             '<h3 class="subsection-title">Founder-led companies</h3>'
             f"{watchlist_founder_html or watchlist_nothing_here}"
         )
+        if watchlist_arbitrary_html:
+            watchlist_body += (
+                '<h3 class="subsection-title">Self-added tickers — not screened by '
+                "this pipeline</h3>"
+                '<p class="sub">These were added directly by ticker, without going '
+                "through the founder-led/biotech screening pipeline — only their "
+                "existence as a real, listed security was verified, nothing else.</p>"
+                f"{watchlist_arbitrary_html}"
+            )
 
     generated = date.today().isoformat()
 

@@ -15,6 +15,7 @@
     --early:#5B6B7A; --early-bg:#E9EDF0;
     --verify:#9C6B1F;
     --delisted:#5B3A8E; --delisted-bg:#EEE7F7;
+    --arbitrary:#1C5D8C; --arbitrary-bg:#E3EEF7;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
@@ -49,6 +50,10 @@
   .flag.moderate{background:var(--moderate-bg); color:var(--moderate);}
   .flag.early{background:var(--early-bg); color:var(--early);}
   .flag.delisted{background:var(--delisted-bg); color:var(--delisted);}
+  .flag.arbitrary{background:var(--arbitrary-bg); color:var(--arbitrary);}
+
+  .card.arbitrary{border-style:dashed; border-color:var(--arbitrary);}
+  .card.arbitrary .ticker{border-color:var(--arbitrary); color:var(--arbitrary);}
 
   .read{font-size:14.5px; line-height:1.65; color:var(--ink); margin-bottom:16px;}
 
@@ -92,12 +97,12 @@
 
   <h2 class="section-title">New since last visit</h2>
   <div class="new-since">
-    <p class="sub">Nothing new since your last visit (2026-08-27 13:17 UTC).</p>
+    <p class="sub">Nothing new since your last visit (2026-08-27 14:56 UTC).</p>
   </div>
 
   <h2 class="section-title">★ Your watchlist</h2>
   <div class="new-since">
-    <p class="sub">Your watchlist is empty. Star an entry with <code>signal-screener watchlist-add &lt;entry_id&gt;</code> — a designation_id (biotech card) or ticker (founder-led card) — to see it here.</p>
+    <p class="sub">Your watchlist is empty. Star an already-screened entry or add an outside ticker with <code>signal-screener watchlist-add &lt;entry_id&gt;</code> — a designation_id, a founder-led/biotech ticker, or any other ticker (verified against Yahoo/SEC before being accepted) — to see it here.</p>
   </div>
 
   <h2 class="section-title">Biotech signals</h2>

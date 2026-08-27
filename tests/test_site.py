@@ -156,6 +156,56 @@ def test_watchlist_section_shows_starred_entry_and_not_unstarred(tmp_path, monke
     assert html_out.count("Other Co") == 1
 
 
+def test_arbitrary_watchlist_ticker_renders_distinctly_from_screened_entries(
+    tmp_path, monkeypatch
+):
+    """A self-added ticker (no companies/designations row at all) must be
+    visually and textually distinguished from a starred, already-screened
+    pipeline entry — a different card class/color, an explicit "Self-
+    added — not screened" flag instead of a tier/confidence pill, and its
+    own labeled subsection, never mixed in as if it had passed the
+    founder-led/biotech screen."""
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="OTHR",
+                company_name="Screened Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+        db.add_to_watchlist(conn, "OTHR", "2026-08-27")
+        db.add_to_watchlist(
+            conn,
+            "AAPL",
+            "2026-08-27",
+            entry_kind="arbitrary",
+            company_name="Apple Inc.",
+            verification_source="yahoo_finance_search",
+            verification_date="2026-08-27",
+            verification_reason="resolved 'aapl' to 'AAPL' ('Apple Inc.')",
+        )
+
+    html_out = site.build_site_html()
+    assert "Self-added — not screened" in html_out
+    assert "not screened by this pipeline" in html_out
+    assert '<div class="card arbitrary">' in html_out
+    assert "Apple Inc." in html_out
+    # The self-added ticker never appears in the main "Founder-led
+    # companies"/"Biotech signals" sections — it was never screened, so
+    # it has no row there to render from in the first place.
+    watchlist_section, _, rest = html_out.partition("Biotech signals</h2>")
+    assert "Apple Inc." in watchlist_section
+    assert "Apple Inc." not in rest
+
+
 def test_no_notes_section_when_entry_has_no_notes(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")

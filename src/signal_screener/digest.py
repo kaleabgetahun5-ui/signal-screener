@@ -178,17 +178,38 @@ def _build_founder_section(conn) -> str:
     return "\n".join(lines)
 
 
+def _format_arbitrary_watchlist_row(row) -> list[str]:
+    """A self-added ticker (db.watchlist, entry_kind='arbitrary') — never
+    run through the founder-led/biotech screening pipeline, only
+    independently verified to exist as a real, currently listed security
+    at the moment it was added. The bracketed tag and explanatory line
+    are deliberately different wording from a screened row's [Founder-
+    CEO]/[High signal]-style tag, so this never reads as if it passed the
+    same screen a starred pipeline entry did."""
+    return [
+        f"{row['entry_id']} — {row['company_name']} [SELF-ADDED — NOT SCREENED]",
+        f"    Existence verified via: {row['verification_source']} "
+        f"(as of {row['verification_date']}) — {row['verification_reason']}",
+        f"    Added to your watchlist: {row['added_at']}",
+    ]
+
+
 def _build_watchlist_section(conn, watchlist_ids: set[str]) -> str:
     """Brief section 8: "your own read... more valuable than anything the
     AI generates" — this is the counterpart for *which* entries matter to
-    you, not just notes on them (user_notes). Mixed biotech + founder-led,
-    each rendered with the exact same per-entry format as its own section
-    below it — no separate, simplified format for this view."""
-    if not watchlist_ids:
+    you, not just notes on them (user_notes). Mixed biotech + founder-led
+    entries render with the exact same per-entry format as their own
+    section below (no separate, simplified format for this view); self-
+    added arbitrary tickers get their own clearly-labeled subsection and
+    a visibly different row format (see _format_arbitrary_watchlist_row)
+    so they're never mistaken for a screened entry."""
+    arbitrary_rows = db.get_arbitrary_watchlist_rows(conn)
+    if not watchlist_ids and not arbitrary_rows:
         return (
-            "Your watchlist is empty. Star an entry with `signal-screener "
-            "watchlist-add <entry_id>` — a designation_id (biotech) or ticker "
-            "(founder-led) — to see it here.\n"
+            "Your watchlist is empty. Star an already-screened entry or add an "
+            "outside ticker with `signal-screener watchlist-add <entry_id>` — a "
+            "designation_id, a founder-led/biotech ticker, or any other ticker "
+            "(verified against Yahoo/SEC before being accepted) — to see it here.\n"
         )
 
     lines = []
@@ -201,11 +222,24 @@ def _build_watchlist_section(conn, watchlist_ids: set[str]) -> str:
             lines.extend(_format_founder_row(conn, row))
             lines.append("")
 
-    if not lines:
+    if not lines and not arbitrary_rows:
         return (
             "Nothing on your watchlist is currently in the pipeline "
             "(it may have since been removed).\n"
         )
+
+    if arbitrary_rows:
+        lines.append("--- Self-added tickers (not screened by this pipeline) ---")
+        lines.append(
+            "These were added directly by ticker, without going through the "
+            "founder-led/biotech screening pipeline — only their existence as a "
+            "real, listed security was verified, nothing else."
+        )
+        lines.append("")
+        for row in arbitrary_rows:
+            lines.extend(_format_arbitrary_watchlist_row(row))
+            lines.append("")
+
     return "\n".join(lines)
 
 

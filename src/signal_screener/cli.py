@@ -6,6 +6,7 @@ from pathlib import Path
 from signal_screener import db
 from signal_screener import digest as digest_module
 from signal_screener import founder_pipeline, pipeline, site, track_record
+from signal_screener.matching.ticker_verify import resolve_arbitrary_ticker
 
 DEFAULT_DB_DUMP_PATH = "data/signal_screener.sql"
 
@@ -83,14 +84,16 @@ def main():
 
     watchlist_add_parser = subparsers.add_parser(
         "watchlist-add",
-        help="Star an already-screened designation or company entry on your personal "
-        "watchlist (shown in its own section on the site and in the digest) — rejects "
-        "an entry_id that isn't already in the pipeline",
+        help="Star an entry on your personal watchlist — an already-screened "
+        "designation_id/ticker, or an arbitrary outside ticker (verified against Yahoo/"
+        "SEC before being accepted; a typo or non-existent symbol is rejected). Shown in "
+        "its own section on the site and in the digest, with self-added tickers clearly "
+        "separated from screened pipeline entries",
     )
     watchlist_add_parser.add_argument(
         "entry_id",
-        help="A designation_id (biotech card) or ticker (founder-led card) that has "
-        "already been screened — not an arbitrary outside ticker",
+        help="A designation_id or ticker already in the pipeline, or any other ticker "
+        "symbol — tried as a pipeline entry first, then as an arbitrary outside ticker",
     )
     watchlist_add_parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -163,31 +166,55 @@ def main():
             db.insert_user_note(conn, args.entry_id, args.note_text, date.today().isoformat())
         print(f"Note added to {args.entry_id}.")
     elif args.command == "watchlist-add":
-        # Unlike add-note (which allows a note for an entry_id that doesn't
-        # exist yet — see its own comment), this rejects outright: the
-        # watchlist only stars entries that have already been screened by
-        # the pipeline (ticker-verified biotech designations / founder-led
-        # companies), never an arbitrary outside ticker. An unscreened
-        # entry_id would otherwise sit invisibly in the table forever —
-        # site.py/digest.py's watchlist section only ever renders rows that
-        # already exist in companies/designations, so a typo'd or
-        # never-screened entry_id would just silently never show up
-        # anywhere, with no indication anything was dropped.
+        # Two paths, tried in order — never a third "add it anyway,
+        # unverified" fallback (this project's core guardrail): a
+        # designation_id/ticker already in companies/designations is
+        # trusted as-is (it's already been through the real pipeline's own
+        # verification); anything else is only accepted as an "arbitrary"
+        # entry if it independently resolves to a real, currently listed
+        # security (matching/ticker_verify.py's resolve_arbitrary_ticker,
+        # same Yahoo/SEC sources the pipeline itself checks against) — a
+        # typo like "MADEUPTICKER123" fails both and is rejected outright,
+        # not silently added and silently never rendered.
         db.init_db()
         with db.connect() as conn:
-            if not db.entry_id_exists(conn, args.entry_id):
-                print(
-                    f"{args.entry_id!r} doesn't match any known designation_id "
-                    "or ticker currently in the pipeline — not adding it. The "
-                    "watchlist only stars already-screened entries, not "
-                    "arbitrary outside tickers."
+            if db.entry_id_exists(conn, args.entry_id):
+                added = db.add_to_watchlist(
+                    conn, args.entry_id, date.today().isoformat(), entry_kind="pipeline"
                 )
-            else:
-                added = db.add_to_watchlist(conn, args.entry_id, date.today().isoformat())
                 if added:
-                    print(f"Added {args.entry_id} to your watchlist.")
+                    print(f"Added {args.entry_id} to your watchlist (screened pipeline entry).")
                 else:
                     print(f"{args.entry_id} was already on your watchlist.")
+            else:
+                verification, resolved_ticker, resolved_name = resolve_arbitrary_ticker(
+                    args.entry_id
+                )
+                if not verification.verified:
+                    print(
+                        f"{args.entry_id!r} doesn't match a screened pipeline entry, and "
+                        f"doesn't resolve to a real, listed security ({verification.reason}) "
+                        "— not adding it."
+                    )
+                else:
+                    added = db.add_to_watchlist(
+                        conn,
+                        resolved_ticker,
+                        date.today().isoformat(),
+                        entry_kind="arbitrary",
+                        company_name=resolved_name,
+                        verification_source=verification.source,
+                        verification_date=verification.checked_date,
+                        verification_reason=verification.reason,
+                    )
+                    if added:
+                        print(
+                            f"Added {resolved_ticker} ({resolved_name}) to your watchlist "
+                            f"as a self-added ticker — not screened by this pipeline, "
+                            f"verified via {verification.source}."
+                        )
+                    else:
+                        print(f"{resolved_ticker} was already on your watchlist.")
     elif args.command == "watchlist-remove":
         db.init_db()
         with db.connect() as conn:
@@ -204,7 +231,13 @@ def main():
             print("Your watchlist is empty.")
         else:
             for row in rows:
-                print(f"{row['entry_id']} (added {row['added_at']})")
+                if row["entry_kind"] == "arbitrary":
+                    print(
+                        f"{row['entry_id']} ({row['company_name']}) [self-added, not "
+                        f"screened] (added {row['added_at']})"
+                    )
+                else:
+                    print(f"{row['entry_id']} [screened pipeline entry] (added {row['added_at']})")
     elif args.command == "check-outcomes":
         db.init_db()
         with db.connect() as conn:

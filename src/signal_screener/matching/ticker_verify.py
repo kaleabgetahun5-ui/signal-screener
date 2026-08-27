@@ -325,6 +325,82 @@ def check_delisted_or_acquired(company_name: str) -> VerificationResult | None:
     )
 
 
+def resolve_arbitrary_ticker(ticker: str) -> tuple[VerificationResult, str | None, str | None]:
+    """For the personal watchlist's "add an outside ticker" case: there's
+    no expected_company_name to check verify_ticker() against here — the
+    company name is exactly the thing this is trying to discover, not
+    something already known and being confirmed. So this looks the ticker
+    up directly on Yahoo (same source, same exact/base-symbol matching as
+    _verify_via_yahoo above, just without the name-comparison step that
+    needs a name in hand first) and reports whatever it finds — a real
+    typo like "MADEUPTICKER123" fails here for having no listing at all,
+    the same never-guess guardrail as everywhere else in this project,
+    just checking a different fact (does this symbol exist) than
+    verify_ticker checks (does this symbol match this specific company).
+
+    Returns (verification_result, resolved_ticker, resolved_company_name).
+    resolved_ticker is always the canonical Yahoo symbol on success (e.g.
+    input "meli" -> "MELI", input "rhm" -> "RHM.DE") — the caller should
+    store that, not the raw input, so it's guaranteed to be the same
+    ticker every downstream link (price, digest, site) actually resolves
+    against. Both resolved_* are None when verified is False.
+    """
+    checked_date = date.today().isoformat()
+    source = "yahoo_finance_search"
+    try:
+        quotes = _fetch_yahoo_quotes(ticker)
+    except requests.RequestException as exc:
+        return (
+            VerificationResult(
+                verified=False,
+                source=source,
+                checked_date=checked_date,
+                reason=f"verification request failed after {RETRY_ATTEMPTS} attempts: {exc}",
+            ),
+            None,
+            None,
+        )
+
+    candidates = [q for q in quotes if q.get("symbol", "").upper() == ticker.upper()]
+    if not candidates:
+        # Same non-US base-ticker fallback as _verify_via_yahoo — see its
+        # comment for why ("ZAL" -> "ZAL.DE" is a real match, "ZALN.MU" is
+        # not).
+        candidates = [
+            q for q in quotes if q.get("symbol", "").upper().split(".")[0] == ticker.upper()
+        ]
+
+    if not candidates:
+        return (
+            VerificationResult(
+                verified=False,
+                source=source,
+                checked_date=checked_date,
+                reason=f"no listing found for symbol {ticker!r}",
+            ),
+            None,
+            None,
+        )
+
+    best = candidates[0]
+    resolved_symbol = best.get("symbol") or ticker
+    resolved_name = best.get("shortname") or best.get("longname") or resolved_symbol
+
+    return (
+        VerificationResult(
+            verified=True,
+            source=source,
+            checked_date=checked_date,
+            reason=f"resolved {ticker!r} to {resolved_symbol!r} ({resolved_name!r})",
+            resolved_ticker=(
+                resolved_symbol if resolved_symbol.upper() != ticker.upper() else None
+            ),
+        ),
+        resolved_symbol,
+        resolved_name,
+    )
+
+
 def verify_ticker(ticker: str, expected_company_name: str) -> VerificationResult:
     checked_date = date.today().isoformat()
 

@@ -130,7 +130,7 @@ CREATE TABLE site_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_generated_at TEXT
 );
-INSERT INTO "site_state" VALUES(1,'2026-08-27T13:22:36.571533+00:00');
+INSERT INTO "site_state" VALUES(1,'2026-08-27T14:57:18.407645+00:00');
 CREATE TABLE tracked_outcomes (
     outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_id TEXT NOT NULL UNIQUE,
@@ -190,7 +190,7 @@ INSERT INTO "user_notes" VALUES(3,'ZAL.DE','2026-08-19','ownership_pct unavailab
 CREATE TABLE watchlist (
     entry_id TEXT PRIMARY KEY,
     added_at TEXT NOT NULL
-);
+, entry_kind TEXT NOT NULL DEFAULT 'pipeline', company_name TEXT, verification_source TEXT, verification_date TEXT, verification_reason TEXT);
 DELETE FROM "sqlite_sequence";
 INSERT INTO "sqlite_sequence" VALUES('user_notes',3);
 INSERT INTO "sqlite_sequence" VALUES('ownership',50);

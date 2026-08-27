@@ -149,25 +149,36 @@ CREATE TABLE IF NOT EXISTS tracked_outcomes (
 -- Personal watchlist (brief section 8's "your own read is the actual
 -- differentiator" philosophy, applied to *which* entries matter to you,
 -- not just notes on them — see user_notes above for the latter). Same
--- entry_id addressing scheme as user_notes/tracked_outcomes: a
--- designation_id or a ticker, no entry_type discriminator needed since
--- the two ID spaces never collide. A row's mere presence is the flag —
--- no boolean column, added/removed via signal-screener watchlist-add /
+-- entry_id addressing scheme as user_notes/tracked_outcomes for a
+-- 'pipeline' entry: a designation_id or a ticker already in companies/
+-- designations. Added/removed via signal-screener watchlist-add /
 -- watchlist-remove (CLI-only, same as add-note — brief section 9: no
 -- accounts, no web form).
 --
--- Unlike user_notes, only already-screened entries may go in this table
--- — cli.py's watchlist-add rejects (not just warns on, per add-note's
--- looser rule) an entry_id that doesn't already exist in companies/
--- designations. This table has no FOREIGN KEY of its own enforcing that
--- (entry_id spans two tables, same reason user_notes doesn't have one
--- either), so it relies entirely on that CLI-layer check — nothing here
--- stops a caller that skips it from inserting a dangling entry_id that
--- site.py/digest.py's watchlist section would then just silently never
--- render.
+-- entry_kind = 'pipeline' | 'arbitrary'. A 'pipeline' entry_id must
+-- already exist in companies/designations — cli.py's watchlist-add
+-- rejects (not just warns on, per add-note's looser rule) one that
+-- doesn't, since site.py/digest.py's watchlist section renders those
+-- straight from those tables and a dangling entry_id would otherwise
+-- just silently never appear anywhere.
+--
+-- An 'arbitrary' entry is a ticker with no row in companies at all — the
+-- personal-watchlist equivalent of "I want to track this even though the
+-- screener never flagged it." It's still never trusted blindly: cli.py
+-- verifies it resolves to a real, currently listed security (matching/
+-- ticker_verify.py's resolve_arbitrary_ticker, same Yahoo/SEC sources
+-- pipeline tickers are checked against) before it's ever stored, and the
+-- verification/company_name columns below exist because these entries
+-- have no companies row to pull that display data from. NULL for
+-- 'pipeline' entries, which already get it from companies/designations.
 CREATE TABLE IF NOT EXISTS watchlist (
     entry_id TEXT PRIMARY KEY,
-    added_at TEXT NOT NULL
+    added_at TEXT NOT NULL,
+    entry_kind TEXT NOT NULL DEFAULT 'pipeline',
+    company_name TEXT,
+    verification_source TEXT,
+    verification_date TEXT,
+    verification_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS trials (
@@ -210,6 +221,11 @@ _MIGRATIONS = [
     ("companies", "first_seen_at", "TEXT"),
     ("designations", "first_seen_at", "TEXT"),
     ("companies", "network_effect_strength", "TEXT"),
+    ("watchlist", "entry_kind", "TEXT NOT NULL DEFAULT 'pipeline'"),
+    ("watchlist", "company_name", "TEXT"),
+    ("watchlist", "verification_source", "TEXT"),
+    ("watchlist", "verification_date", "TEXT"),
+    ("watchlist", "verification_reason", "TEXT"),
 ]
 
 
@@ -437,16 +453,53 @@ def get_notes_for_entry(conn: sqlite3.Connection, entry_id: str) -> list[sqlite3
     ).fetchall()
 
 
-def add_to_watchlist(conn: sqlite3.Connection, entry_id: str, added_at: str) -> bool:
+def add_to_watchlist(
+    conn: sqlite3.Connection,
+    entry_id: str,
+    added_at: str,
+    *,
+    entry_kind: str = "pipeline",
+    company_name: str | None = None,
+    verification_source: str | None = None,
+    verification_date: str | None = None,
+    verification_reason: str | None = None,
+) -> bool:
     """INSERT OR IGNORE: starring an already-starred entry is a no-op, not
     an error (entry_id is the primary key, so a second add would otherwise
     fail the insert). Returns True iff a row was actually added, so the
-    CLI can tell the user whether this was already on their watchlist."""
+    CLI can tell the user whether this was already on their watchlist.
+
+    The company_name/verification_* columns are only ever populated for
+    entry_kind="arbitrary" — a 'pipeline' entry already has that data in
+    companies/designations, so cli.py never passes them for one."""
     cur = conn.execute(
-        "INSERT OR IGNORE INTO watchlist (entry_id, added_at) VALUES (?, ?)",
-        (entry_id, added_at),
+        """
+        INSERT OR IGNORE INTO watchlist (
+            entry_id, added_at, entry_kind, company_name,
+            verification_source, verification_date, verification_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            entry_id,
+            added_at,
+            entry_kind,
+            company_name,
+            verification_source,
+            verification_date,
+            verification_reason,
+        ),
     )
     return cur.rowcount > 0
+
+
+def get_arbitrary_watchlist_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """The self-added, never-screened-by-the-pipeline half of the
+    watchlist — what site.py/digest.py render as a visually/textually
+    distinct group from starred pipeline entries (see watchlist's schema
+    comment)."""
+    return conn.execute(
+        "SELECT * FROM watchlist WHERE entry_kind = 'arbitrary' ORDER BY added_at, entry_id"
+    ).fetchall()
 
 
 def remove_from_watchlist(conn: sqlite3.Connection, entry_id: str) -> bool:
@@ -457,11 +510,17 @@ def remove_from_watchlist(conn: sqlite3.Connection, entry_id: str) -> bool:
 
 
 def get_watchlist_entry_ids(conn: sqlite3.Connection) -> set[str]:
-    """What site.py/digest.py filter their own already-fetched rows
-    against — a plain set, not a join, since entry_id points into two
-    different tables depending on designation vs. ticker (same reason
-    entry_id_exists() below checks both rather than joining)."""
-    return {row["entry_id"] for row in conn.execute("SELECT entry_id FROM watchlist")}
+    """What site.py/digest.py filter their own already-fetched companies/
+    designations rows against — a plain set, not a join, since entry_id
+    points into two different tables depending on designation vs. ticker
+    (same reason entry_id_exists() below checks both rather than
+    joining). Scoped to entry_kind='pipeline': an 'arbitrary' entry has no
+    row in companies/designations to match against anyway, and is instead
+    rendered from get_arbitrary_watchlist_rows()."""
+    return {
+        row["entry_id"]
+        for row in conn.execute("SELECT entry_id FROM watchlist WHERE entry_kind = 'pipeline'")
+    }
 
 
 def list_watchlist(conn: sqlite3.Connection) -> list[sqlite3.Row]:
