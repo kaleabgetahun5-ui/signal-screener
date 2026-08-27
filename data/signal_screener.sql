@@ -130,7 +130,7 @@ CREATE TABLE site_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     last_generated_at TEXT
 );
-INSERT INTO "site_state" VALUES(1,'2026-08-27T03:40:18.193723+00:00');
+INSERT INTO "site_state" VALUES(1,'2026-08-27T13:22:36.571533+00:00');
 CREATE TABLE tracked_outcomes (
     outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
     entry_id TEXT NOT NULL UNIQUE,
@@ -187,6 +187,10 @@ CREATE TABLE user_notes (
 );
 INSERT INTO "user_notes" VALUES(1,'cc178b137b0e1a6e','2026-08-14','First real CRISPR therapy approval - worth tracking how the pricing/reimbursement story plays out.');
 INSERT INTO "user_notes" VALUES(3,'ZAL.DE','2026-08-19','ownership_pct unavailable for both Zalando co-founders (Robert Gentz, David Schneider): the only source disclosing their combined stake (~5%) is a PNG chart on corporate.zalando.com/en/investor-relations/shareholder-structure, not machine-readable text this pipeline can extract. BaFin''s WpHG voting-rights database has nothing on file for either individually (both below the 3% mandatory disclosure threshold). CONSEQUENCE: if either founder''s leadership status changes (e.g. steps back from CEO to Chairman), the automated Founder-Chair vs. Founder-departed classification cannot verify the required >5% ownership threshold from any scraped source. Check the shareholder-structure page manually before trusting that classification.');
+CREATE TABLE watchlist (
+    entry_id TEXT PRIMARY KEY,
+    added_at TEXT NOT NULL
+);
 DELETE FROM "sqlite_sequence";
 INSERT INTO "sqlite_sequence" VALUES('user_notes',3);
 INSERT INTO "sqlite_sequence" VALUES('ownership',50);

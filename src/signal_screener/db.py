@@ -146,6 +146,20 @@ CREATE TABLE IF NOT EXISTS tracked_outcomes (
     notes_on_outcome TEXT
 );
 
+-- Personal watchlist (brief section 8's "your own read is the actual
+-- differentiator" philosophy, applied to *which* entries matter to you,
+-- not just notes on them — see user_notes above for the latter). Same
+-- entry_id addressing scheme as user_notes/tracked_outcomes: a
+-- designation_id or a ticker, no entry_type discriminator needed since
+-- the two ID spaces never collide. A row's mere presence is the flag —
+-- no boolean column, added/removed via signal-screener watchlist-add /
+-- watchlist-remove (CLI-only, same as add-note — brief section 9: no
+-- accounts, no web form).
+CREATE TABLE IF NOT EXISTS watchlist (
+    entry_id TEXT PRIMARY KEY,
+    added_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS trials (
     trial_id TEXT PRIMARY KEY,
     registry TEXT NOT NULL,
@@ -411,6 +425,37 @@ def get_notes_for_entry(conn: sqlite3.Connection, entry_id: str) -> list[sqlite3
         "SELECT * FROM user_notes WHERE entry_id = ? ORDER BY date_written, note_id",
         (entry_id,),
     ).fetchall()
+
+
+def add_to_watchlist(conn: sqlite3.Connection, entry_id: str, added_at: str) -> bool:
+    """INSERT OR IGNORE: starring an already-starred entry is a no-op, not
+    an error (entry_id is the primary key, so a second add would otherwise
+    fail the insert). Returns True iff a row was actually added, so the
+    CLI can tell the user whether this was already on their watchlist."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO watchlist (entry_id, added_at) VALUES (?, ?)",
+        (entry_id, added_at),
+    )
+    return cur.rowcount > 0
+
+
+def remove_from_watchlist(conn: sqlite3.Connection, entry_id: str) -> bool:
+    """Returns True iff a row was actually removed, so the CLI can report
+    an honest result rather than a silent no-op for a typo'd entry_id."""
+    cur = conn.execute("DELETE FROM watchlist WHERE entry_id = ?", (entry_id,))
+    return cur.rowcount > 0
+
+
+def get_watchlist_entry_ids(conn: sqlite3.Connection) -> set[str]:
+    """What site.py/digest.py filter their own already-fetched rows
+    against — a plain set, not a join, since entry_id points into two
+    different tables depending on designation vs. ticker (same reason
+    entry_id_exists() below checks both rather than joining)."""
+    return {row["entry_id"] for row in conn.execute("SELECT entry_id FROM watchlist")}
+
+
+def list_watchlist(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM watchlist ORDER BY added_at, entry_id").fetchall()
 
 
 def entry_id_exists(conn: sqlite3.Connection, entry_id: str) -> bool:

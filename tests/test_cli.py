@@ -41,3 +41,56 @@ def test_add_note_no_warning_for_known_ticker(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Warning" not in out
     assert "Note added to TEST" in out
+
+
+def test_watchlist_add_remove_list_roundtrip(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(conn, Company(ticker="TEST", company_name="Test Co"))
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-add", "TEST"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Warning" not in out
+    assert "Added TEST to your watchlist." in out
+
+    # Adding again reports it was already there, not a second insert.
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-add", "TEST"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "already on your watchlist" in out
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-list"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "TEST" in out
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-remove", "TEST"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Removed TEST from your watchlist." in out
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-remove", "TEST"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "wasn't on your watchlist" in out
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-list"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Your watchlist is empty." in out
+
+
+def test_watchlist_add_warns_on_unknown_entry_id(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "watchlist-add", "NOTATICKER"])
+    cli.main()
+
+    out = capsys.readouterr().out
+    assert "Warning" in out
+    assert "Added NOTATICKER to your watchlist." in out

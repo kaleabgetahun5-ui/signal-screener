@@ -81,6 +81,27 @@ def main():
     note_parser.add_argument("note_text", help="The note text")
     note_parser.add_argument("-v", "--verbose", action="store_true")
 
+    watchlist_add_parser = subparsers.add_parser(
+        "watchlist-add",
+        help="Star a designation or company entry on your personal watchlist "
+        "(shown in its own section on the site and in the digest)",
+    )
+    watchlist_add_parser.add_argument(
+        "entry_id", help="A designation_id (biotech card) or ticker (founder-led card)"
+    )
+    watchlist_add_parser.add_argument("-v", "--verbose", action="store_true")
+
+    watchlist_remove_parser = subparsers.add_parser(
+        "watchlist-remove", help="Remove an entry from your personal watchlist"
+    )
+    watchlist_remove_parser.add_argument("entry_id")
+    watchlist_remove_parser.add_argument("-v", "--verbose", action="store_true")
+
+    watchlist_list_parser = subparsers.add_parser(
+        "watchlist-list", help="Print every entry_id currently on your personal watchlist"
+    )
+    watchlist_list_parser.add_argument("-v", "--verbose", action="store_true")
+
     check_outcomes_parser = subparsers.add_parser(
         "check-outcomes",
         help="Fill in any due 3/6/12-month price checkpoints in tracked_outcomes "
@@ -138,6 +159,36 @@ def main():
                 )
             db.insert_user_note(conn, args.entry_id, args.note_text, date.today().isoformat())
         print(f"Note added to {args.entry_id}.")
+    elif args.command == "watchlist-add":
+        db.init_db()
+        with db.connect() as conn:
+            if not db.entry_id_exists(conn, args.entry_id):
+                print(
+                    f"Warning: {args.entry_id!r} doesn't match any known "
+                    "designation_id or ticker — starring it anyway."
+                )
+            added = db.add_to_watchlist(conn, args.entry_id, date.today().isoformat())
+        if added:
+            print(f"Added {args.entry_id} to your watchlist.")
+        else:
+            print(f"{args.entry_id} was already on your watchlist.")
+    elif args.command == "watchlist-remove":
+        db.init_db()
+        with db.connect() as conn:
+            removed = db.remove_from_watchlist(conn, args.entry_id)
+        if removed:
+            print(f"Removed {args.entry_id} from your watchlist.")
+        else:
+            print(f"{args.entry_id} wasn't on your watchlist.")
+    elif args.command == "watchlist-list":
+        db.init_db()
+        with db.connect() as conn:
+            rows = db.list_watchlist(conn)
+        if not rows:
+            print("Your watchlist is empty.")
+        else:
+            for row in rows:
+                print(f"{row['entry_id']} (added {row['added_at']})")
     elif args.command == "check-outcomes":
         db.init_db()
         with db.connect() as conn:

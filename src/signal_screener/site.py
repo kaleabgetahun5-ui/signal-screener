@@ -317,6 +317,7 @@ def build_site_html() -> str:
         # Read before this run's generation overwrites it — this is the
         # baseline the "New since last visit" section diffs against.
         previous_generated_at = db.get_last_generated_at(conn)
+        watchlist_ids = db.get_watchlist_entry_ids(conn)
 
         biotech_rows = conn.execute(
             """
@@ -382,6 +383,13 @@ def build_site_html() -> str:
         card_html for row, card_html in founder_cards if _is_new(row, previous_generated_at)
     )
 
+    watchlist_biotech_html = "".join(
+        card_html for row, card_html in biotech_cards if row["designation_id"] in watchlist_ids
+    )
+    watchlist_founder_html = "".join(
+        card_html for row, card_html in founder_cards if row["ticker"] in watchlist_ids
+    )
+
     if previous_generated_at is None:
         new_since_body = (
             '<p class="sub">This is the first generated snapshot — nothing to compare '
@@ -404,6 +412,27 @@ def build_site_html() -> str:
             f'{new_biotech_html or nothing_new_here}'
             f'<h3 class="subsection-title">New founder-led companies</h3>'
             f'{new_founder_html or nothing_new_here}'
+        )
+
+    if not watchlist_ids:
+        watchlist_body = (
+            '<p class="sub">Your watchlist is empty. Star an entry with '
+            "<code>signal-screener watchlist-add &lt;entry_id&gt;</code> — a "
+            "designation_id (biotech card) or ticker (founder-led card) — to see it "
+            "here.</p>"
+        )
+    elif not watchlist_biotech_html and not watchlist_founder_html:
+        watchlist_body = (
+            '<p class="sub">Nothing on your watchlist is currently in the pipeline '
+            "(it may have since been removed).</p>"
+        )
+    else:
+        watchlist_nothing_here = '<p class="sub">Nothing here.</p>'
+        watchlist_body = (
+            '<h3 class="subsection-title">Biotech signals</h3>'
+            f"{watchlist_biotech_html or watchlist_nothing_here}"
+            '<h3 class="subsection-title">Founder-led companies</h3>'
+            f"{watchlist_founder_html or watchlist_nothing_here}"
         )
 
     generated = date.today().isoformat()
@@ -434,6 +463,11 @@ def build_site_html() -> str:
   <h2 class="section-title">New since last visit</h2>
   <div class="new-since">
     {new_since_body}
+  </div>
+
+  <h2 class="section-title">★ Your watchlist</h2>
+  <div class="new-since">
+    {watchlist_body}
   </div>
 
   <h2 class="section-title">Biotech signals</h2>

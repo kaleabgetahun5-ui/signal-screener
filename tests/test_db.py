@@ -192,3 +192,35 @@ def test_user_notes_insert_get_and_entry_id_exists(tmp_path, monkeypatch):
         notes = db.get_notes_for_entry(conn, "TEST")
         assert [n["note_text"] for n in notes] == ["First note.", "Second note."]
         assert db.get_notes_for_entry(conn, "NOTATICKER") == []
+
+
+def test_watchlist_add_remove_and_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+
+    db.init_db()
+    with db.connect() as conn:
+        assert db.get_watchlist_entry_ids(conn) == set()
+        assert db.list_watchlist(conn) == []
+
+        added = db.add_to_watchlist(conn, "TEST", "2026-08-27")
+        assert added is True
+        assert db.get_watchlist_entry_ids(conn) == {"TEST"}
+
+        # Starring an already-starred entry is a no-op, not an error.
+        added_again = db.add_to_watchlist(conn, "TEST", "2026-08-28")
+        assert added_again is False
+
+        db.add_to_watchlist(conn, "abc123", "2026-08-27")
+
+    with db.connect() as conn:
+        rows = db.list_watchlist(conn)
+        assert [r["entry_id"] for r in rows] == ["TEST", "abc123"]
+
+        removed = db.remove_from_watchlist(conn, "TEST")
+        assert removed is True
+        assert db.get_watchlist_entry_ids(conn) == {"abc123"}
+
+        # Removing something not on the watchlist is reported, not silent.
+        removed_again = db.remove_from_watchlist(conn, "TEST")
+        assert removed_again is False

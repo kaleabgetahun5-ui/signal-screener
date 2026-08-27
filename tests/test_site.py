@@ -101,6 +101,61 @@ def test_notes_render_on_biotech_card(tmp_path, monkeypatch):
     assert "Worth watching the Phase 2 readout." in html_out
 
 
+def test_watchlist_section_empty_state(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    db.init_db()
+
+    html_out = site.build_site_html()
+    assert "Your watchlist is empty" in html_out
+    assert "watchlist-add" in html_out
+
+
+def test_watchlist_section_shows_starred_entry_and_not_unstarred(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company, Designation
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(conn, Company(ticker="TEST", company_name="Test Co", ticker_verified=True))
+        db.upsert_designation(
+            conn,
+            Designation(
+                designation_id="abc123",
+                ticker="TEST",
+                source="FDA",
+                type="Breakthrough Therapy",
+                date_granted="2026-01-01",
+                drug_name="Starred Drug",
+                indication="Test indication",
+                trial_id=None,
+                data_source="unit_test",
+                data_as_of_date="2026-01-01",
+                raw_company_name="Test Co",
+            ),
+        )
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="OTHR",
+                company_name="Other Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+        db.add_to_watchlist(conn, "abc123", "2026-08-27")
+
+    html_out = site.build_site_html()
+    assert "★ Your watchlist" in html_out
+    # Starred biotech entry appears twice: once in the watchlist section,
+    # once in the main "Biotech signals" section — same card markup.
+    assert html_out.count("Starred Drug") == 2
+    # Unstarred founder-led entry appears only in its own main section.
+    assert html_out.count("Other Co") == 1
+
+
 def test_no_notes_section_when_entry_has_no_notes(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")

@@ -9,6 +9,10 @@ step 5's diff view); every run currently emits everything in the database.
 Every line item carries its source and as-of date (guardrail, brief section
 6), and the biotech/founder-led sections stay clearly separate rather than
 merged, mirroring how the two screeners' data stays separate in the schema.
+
+A "Your Watchlist" section runs first, ahead of both — mixed biotech and
+founder-led entries the user has personally starred (db.watchlist), each
+reusing the exact same per-entry formatting as its own section below.
 """
 
 import smtplib
@@ -64,8 +68,30 @@ def _ticker_label(ticker: str, verified: bool, delisted_or_acquired: bool = Fals
     return ticker
 
 
-def _build_biotech_section(conn) -> str:
-    rows = conn.execute(
+def _format_biotech_row(row) -> list[str]:
+    ticker_label = _ticker_label(
+        row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
+    )
+    lines = [
+        f"[{row['source']}] {row['drug_name']} "
+        f"— {row['resolved_company_name']} ({ticker_label})"
+    ]
+    if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
+        lines.append(_wrap(row["ticker_verification_reason"]))
+    granted_line = f"    Designation: {row['type']}, granted {row['date_granted']}"
+    if row["date_granted_source"]:
+        granted_line += f" (source: {row['date_granted_source']})"
+    lines.append(granted_line)
+    flag = row["summary_confidence_flag"] or "not yet summarized"
+    lines.append(f"    Confidence: {flag}")
+    if row["summary_text"]:
+        lines.append(_wrap(row["summary_text"]))
+    lines.append(f"    Source: {row['data_source']} (as of {row['data_as_of_date']})")
+    return lines
+
+
+def _biotech_rows(conn) -> list:
+    return conn.execute(
         """
         SELECT d.*, c.company_name AS resolved_company_name, c.ticker_verified,
                c.delisted_or_acquired, c.ticker_verification_reason
@@ -75,37 +101,56 @@ def _build_biotech_section(conn) -> str:
         """
     ).fetchall()
 
+
+def _build_biotech_section(conn) -> str:
+    rows = _biotech_rows(conn)
     if not rows:
         return "No biotech designations on file yet.\n"
 
     lines = []
     for row in rows:
-        ticker_label = _ticker_label(
-            row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
-        )
-        lines.append(
-            f"[{row['source']}] {row['drug_name']} "
-            f"— {row['resolved_company_name']} ({ticker_label})"
-        )
-        if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
-            lines.append(_wrap(row["ticker_verification_reason"]))
-        granted_line = f"    Designation: {row['type']}, granted {row['date_granted']}"
-        if row["date_granted_source"]:
-            granted_line += f" (source: {row['date_granted_source']})"
-        lines.append(granted_line)
-        flag = row["summary_confidence_flag"] or "not yet summarized"
-        lines.append(f"    Confidence: {flag}")
-        if row["summary_text"]:
-            lines.append(_wrap(row["summary_text"]))
-        lines.append(
-            f"    Source: {row['data_source']} (as of {row['data_as_of_date']})"
-        )
+        lines.extend(_format_biotech_row(row))
         lines.append("")
     return "\n".join(lines)
 
 
-def _build_founder_section(conn) -> str:
-    rows = conn.execute(
+def _format_founder_row(conn, row) -> list[str]:
+    ticker_label = _ticker_label(
+        row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
+    )
+    lines = [f"{ticker_label} — {row['company_name']} [{row['founder_tier']}]"]
+    if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
+        lines.append(_wrap(row["ticker_verification_reason"]))
+
+    ownership = conn.execute(
+        "SELECT * FROM ownership WHERE ticker = ? ORDER BY as_of_date DESC, "
+        "ownership_id DESC LIMIT 1",
+        (row["ticker"],),
+    ).fetchone()
+    if ownership:
+        pct = (
+            f"{ownership['ownership_pct']:.1f}%"
+            if ownership["ownership_pct"] is not None
+            else "not disclosed"
+        )
+        lines.append(f"    Founder: {row['founder_name']} — {ownership['role']} ({pct})")
+    elif row["founder_name"]:
+        lines.append(f"    Founder: {row['founder_name']}")
+
+    if row["network_effect"]:
+        strength = f"[{row['network_effect_strength']}] " if row["network_effect_strength"] else ""
+        lines.append(_wrap(f"Network effect: {strength}{row['network_effect']}"))
+
+    if row["founder_tier_source"]:
+        lines.append(
+            f"    Source: {row['founder_tier_source']} "
+            f"(as of {row['founder_tier_as_of_date']})"
+        )
+    return lines
+
+
+def _founder_rows(conn) -> list:
+    return conn.execute(
         """
         SELECT * FROM companies
         WHERE listing_type IN ('ADR', 'primary')
@@ -120,43 +165,47 @@ def _build_founder_section(conn) -> str:
         """
     ).fetchall()
 
+
+def _build_founder_section(conn) -> str:
+    rows = _founder_rows(conn)
     if not rows:
         return "No founder-led companies on file yet.\n"
 
     lines = []
     for row in rows:
-        ticker_label = _ticker_label(
-            row["ticker"], bool(row["ticker_verified"]), bool(row["delisted_or_acquired"])
-        )
-        lines.append(f"{ticker_label} — {row['company_name']} [{row['founder_tier']}]")
-        if row["delisted_or_acquired"] and row["ticker_verification_reason"]:
-            lines.append(_wrap(row["ticker_verification_reason"]))
-
-        ownership = conn.execute(
-            "SELECT * FROM ownership WHERE ticker = ? ORDER BY as_of_date DESC, "
-            "ownership_id DESC LIMIT 1",
-            (row["ticker"],),
-        ).fetchone()
-        if ownership:
-            pct = (
-                f"{ownership['ownership_pct']:.1f}%"
-                if ownership["ownership_pct"] is not None
-                else "not disclosed"
-            )
-            lines.append(f"    Founder: {row['founder_name']} — {ownership['role']} ({pct})")
-        elif row["founder_name"]:
-            lines.append(f"    Founder: {row['founder_name']}")
-
-        if row["network_effect"]:
-            strength = f"[{row['network_effect_strength']}] " if row["network_effect_strength"] else ""
-            lines.append(_wrap(f"Network effect: {strength}{row['network_effect']}"))
-
-        if row["founder_tier_source"]:
-            lines.append(
-                f"    Source: {row['founder_tier_source']} "
-                f"(as of {row['founder_tier_as_of_date']})"
-            )
+        lines.extend(_format_founder_row(conn, row))
         lines.append("")
+    return "\n".join(lines)
+
+
+def _build_watchlist_section(conn, watchlist_ids: set[str]) -> str:
+    """Brief section 8: "your own read... more valuable than anything the
+    AI generates" — this is the counterpart for *which* entries matter to
+    you, not just notes on them (user_notes). Mixed biotech + founder-led,
+    each rendered with the exact same per-entry format as its own section
+    below it — no separate, simplified format for this view."""
+    if not watchlist_ids:
+        return (
+            "Your watchlist is empty. Star an entry with `signal-screener "
+            "watchlist-add <entry_id>` — a designation_id (biotech) or ticker "
+            "(founder-led) — to see it here.\n"
+        )
+
+    lines = []
+    for row in _biotech_rows(conn):
+        if row["designation_id"] in watchlist_ids:
+            lines.extend(_format_biotech_row(row))
+            lines.append("")
+    for row in _founder_rows(conn):
+        if row["ticker"] in watchlist_ids:
+            lines.extend(_format_founder_row(conn, row))
+            lines.append("")
+
+    if not lines:
+        return (
+            "Nothing on your watchlist is currently in the pipeline "
+            "(it may have since been removed).\n"
+        )
     return "\n".join(lines)
 
 
@@ -194,6 +243,8 @@ def _failure_count_line(conn) -> str:
 def build_digest() -> Digest:
     db.init_db()
     with db.connect() as conn:
+        watchlist_ids = db.get_watchlist_entry_ids(conn)
+        watchlist_section = _build_watchlist_section(conn, watchlist_ids)
         biotech_section = _build_biotech_section(conn)
         founder_section = _build_founder_section(conn)
         failure_line = _failure_count_line(conn)
@@ -204,6 +255,11 @@ def build_digest() -> Digest:
 
 {DISCLAIMER}
 
+================================================
+★ YOUR WATCHLIST
+================================================
+
+{watchlist_section}
 ================================================
 BIOTECH SIGNALS (FDA Breakthrough Therapy / EMA PRIME)
 ================================================
