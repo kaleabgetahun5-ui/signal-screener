@@ -210,7 +210,7 @@ BIOTECH SIGNALS (FDA Breakthrough Therapy / EMA PRIME)
 
 {biotech_section}
 ================================================
-FOUNDER-LED COMPANIES (Tier 1 / ADR)
+FOUNDER-LED COMPANIES
 ================================================
 
 {founder_section}
