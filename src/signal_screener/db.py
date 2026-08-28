@@ -48,7 +48,18 @@ CREATE TABLE IF NOT EXISTS companies (
     -- NULL for rows that existed before this column was added (migrated,
     -- not backfilled) — deliberately: we don't actually know when those
     -- were first seen, so they must never show up as "new."
-    first_seen_at TEXT
+    first_seen_at TEXT,
+    -- Valuation snapshot (valuation.py) — see models.py's Company for the
+    -- "never fabricated, re-fetched fresh every run" contract these share
+    -- with market_cap/currency above.
+    trailing_pe REAL,
+    forward_pe REAL,
+    fifty_two_week_low REAL,
+    fifty_two_week_high REAL,
+    beta REAL,
+    dividend_yield_pct REAL,
+    valuation_as_of_date TEXT,
+    valuation_source TEXT
 );
 
 -- Append-only: one row per (re-)classification run, so founder ownership
@@ -226,6 +237,14 @@ _MIGRATIONS = [
     ("watchlist", "verification_source", "TEXT"),
     ("watchlist", "verification_date", "TEXT"),
     ("watchlist", "verification_reason", "TEXT"),
+    ("companies", "trailing_pe", "REAL"),
+    ("companies", "forward_pe", "REAL"),
+    ("companies", "fifty_two_week_low", "REAL"),
+    ("companies", "fifty_two_week_high", "REAL"),
+    ("companies", "beta", "REAL"),
+    ("companies", "dividend_yield_pct", "REAL"),
+    ("companies", "valuation_as_of_date", "TEXT"),
+    ("companies", "valuation_source", "TEXT"),
 ]
 
 
@@ -277,8 +296,10 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             founder_tier, listing_type, ticker_verified, ticker_verification_source,
             ticker_verification_date, ticker_verification_reason, ticker_match_confidence,
             founder_name, network_effect, network_effect_strength, founder_tier_source,
-            founder_tier_as_of_date, delisted_or_acquired, first_seen_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            founder_tier_as_of_date, delisted_or_acquired, first_seen_at,
+            trailing_pe, forward_pe, fifty_two_week_low, fifty_two_week_high, beta,
+            dividend_yield_pct, valuation_as_of_date, valuation_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker) DO UPDATE SET
             company_name=excluded.company_name,
             exchange=excluded.exchange,
@@ -298,7 +319,15 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             network_effect_strength=excluded.network_effect_strength,
             founder_tier_source=excluded.founder_tier_source,
             founder_tier_as_of_date=excluded.founder_tier_as_of_date,
-            delisted_or_acquired=excluded.delisted_or_acquired
+            delisted_or_acquired=excluded.delisted_or_acquired,
+            trailing_pe=excluded.trailing_pe,
+            forward_pe=excluded.forward_pe,
+            fifty_two_week_low=excluded.fifty_two_week_low,
+            fifty_two_week_high=excluded.fifty_two_week_high,
+            beta=excluded.beta,
+            dividend_yield_pct=excluded.dividend_yield_pct,
+            valuation_as_of_date=excluded.valuation_as_of_date,
+            valuation_source=excluded.valuation_source
         """,
         (
             company.ticker,
@@ -322,6 +351,14 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             company.founder_tier_as_of_date,
             int(company.delisted_or_acquired),
             now_iso(),
+            company.trailing_pe,
+            company.forward_pe,
+            company.fifty_two_week_low,
+            company.fifty_two_week_high,
+            company.beta,
+            company.dividend_yield_pct,
+            company.valuation_as_of_date,
+            company.valuation_source,
         ),
     )
 

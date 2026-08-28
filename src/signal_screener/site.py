@@ -93,6 +93,8 @@ CSS = """
 
   .meta{font-size:13px; color:var(--ink-soft); margin-bottom:14px; line-height:1.6;}
   .meta strong{color:var(--ink); font-weight:500;}
+  .meta.valuation{font-family:'IBM Plex Mono', monospace; font-size:12px;}
+  .valuation-as-of{font-style:italic;}
 
   .flag{display:inline-block; font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.03em; text-transform:uppercase; padding:3px 9px; border-radius:20px; margin-bottom:12px;}
   .flag.high{background:var(--high-bg); color:var(--high);}
@@ -235,6 +237,68 @@ def _render_biotech_card(row, notes=()) -> str:
   </div>"""
 
 
+def _format_market_cap(value: float | None, currency: str | None) -> str | None:
+    if value is None:
+        return None
+    abs_value = abs(value)
+    if abs_value >= 1e12:
+        magnitude = f"{value / 1e12:.1f}T"
+    elif abs_value >= 1e9:
+        magnitude = f"{value / 1e9:.1f}B"
+    elif abs_value >= 1e6:
+        magnitude = f"{value / 1e6:.1f}M"
+    else:
+        magnitude = f"{value:,.0f}"
+    return f"{magnitude} {currency}".strip() if currency else magnitude
+
+
+def _valuation_html(row) -> str:
+    """Roadmap extra: market cap/P/E/52-week range/beta/dividend yield,
+    pulled from valuation.py (Yahoo's quoteSummary endpoint — a different
+    source from the chart/search endpoints the rest of this project
+    already used, since neither of those carries these fields at all).
+    Never fabricated: any field valuation.fetch_valuation_metrics()
+    couldn't get comes through as None here and is either shown as "not
+    available" (market cap, P/E — always meaningful for an active
+    listing) or omitted entirely (beta, dividend yield — not every
+    company has one, and Yahoo itself distinguishes "zero" from "none" by
+    returning nothing at all for the latter, see valuation.py's _raw()).
+    Returns "" (no block at all) if every field is missing — e.g. a
+    company whose valuation fetch failed outright, or a delisted/acquired
+    one that never had this fetched in the first place."""
+    market_cap = _format_market_cap(row["market_cap"], row["currency"])
+    trailing_pe = row["trailing_pe"]
+    forward_pe = row["forward_pe"]
+    beta = row["beta"]
+    dividend_yield = row["dividend_yield_pct"]
+    low = row["fifty_two_week_low"]
+    high = row["fifty_two_week_high"]
+
+    if all(v is None for v in (market_cap, trailing_pe, forward_pe, beta, dividend_yield, low, high)):
+        return ""
+
+    parts = [f"<strong>Market cap:</strong> {html.escape(market_cap) if market_cap else 'not available'}"]
+
+    pe_text = f"{trailing_pe:.1f}" if trailing_pe is not None else "not available"
+    if forward_pe is not None:
+        pe_text += f" (fwd {forward_pe:.1f})"
+    parts.append(f"<strong>P/E:</strong> {html.escape(pe_text)}")
+
+    if low is not None and high is not None:
+        currency = html.escape(row["currency"] or "")
+        parts.append(f"<strong>52-wk range:</strong> {low:,.2f}–{high:,.2f} {currency}".strip())
+    if beta is not None:
+        parts.append(f"<strong>Beta:</strong> {beta:.2f}")
+    if dividend_yield is not None:
+        parts.append(f"<strong>Dividend yield:</strong> {dividend_yield:.2f}%")
+
+    as_of = row["valuation_as_of_date"]
+    as_of_html = (
+        f' <span class="valuation-as-of">(as of {html.escape(as_of)})</span>' if as_of else ""
+    )
+    return f'<div class="meta valuation">{" · ".join(parts)}{as_of_html}</div>'
+
+
 def _render_founder_card(row, ownership, notes=()) -> str:
     verified = bool(row["ticker_verified"])
     delisted = bool(row["delisted_or_acquired"])
@@ -292,6 +356,7 @@ def _render_founder_card(row, ownership, notes=()) -> str:
 
     delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
     notes_html = _notes_html(notes)
+    valuation_html = _valuation_html(row)
 
     ticker_display = f"{exchange}: {ticker}" if exchange else ticker
 
@@ -304,6 +369,7 @@ def _render_founder_card(row, ownership, notes=()) -> str:
       </div>
       {_flag_pill(tier_label, tier_class)}
       <div class="meta"><strong>HQ:</strong> {country} · <strong>Founder:</strong> {html.escape(row['founder_name'] or 'unknown')} · <strong>Network effect:</strong> {network_effect}</div>
+      {valuation_html}
       <div class="read">{read_text}</div>
       {delisted_html}
       {notes_html}

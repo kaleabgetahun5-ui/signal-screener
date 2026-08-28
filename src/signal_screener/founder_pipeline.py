@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from signal_screener import db, track_record
+from signal_screener import db, track_record, valuation
 from signal_screener.filings import germany, hongkong, korea, netherlands
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
@@ -172,7 +172,35 @@ def _effective_transition_date(candidate: Tier2Candidate, extraction_transition_
     return min(anchor, extraction_transition_date)
 
 
-def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
+def _fetch_valuation_for(session_and_crumb, ticker: str) -> dict:
+    """Returns Company(**kwargs)-ready valuation fields — {} (the
+    dataclass's own None defaults apply) if session_and_crumb is None
+    (valuation.get_session_and_crumb() failed for the whole run) or the
+    per-ticker fetch itself failed. Only called on each loop's success
+    path, not every early-exit branch — a company that never reached
+    ticker verification or founder classification has nothing to enrich
+    (see the docstring on where this is called from)."""
+    if session_and_crumb is None:
+        return {}
+    session, crumb = session_and_crumb
+    metrics = valuation.fetch_valuation_metrics(session, crumb, ticker)
+    if metrics is None:
+        return {}
+    return {
+        "market_cap": metrics.market_cap,
+        "currency": metrics.currency,
+        "trailing_pe": metrics.trailing_pe,
+        "forward_pe": metrics.forward_pe,
+        "fifty_two_week_low": metrics.fifty_two_week_low,
+        "fifty_two_week_high": metrics.fifty_two_week_high,
+        "beta": metrics.beta,
+        "dividend_yield_pct": metrics.dividend_yield_pct,
+        "valuation_as_of_date": metrics.as_of_date,
+        "valuation_source": metrics.source,
+    }
+
+
+def _run_tier2(conn, run_summary: RunSummary, processed: list[str], session_and_crumb) -> None:
     """Tier 2 (brief section 3): same match/verify/classify/store shape as
     the Tier 1 loop in run() below, kept as a separate function rather
     than unified with it — filing metadata (form/filing_date/exchange/
@@ -323,6 +351,7 @@ def _run_tier2(conn, run_summary: RunSummary, processed: list[str]) -> None:
             founder_tier_source=source_citation,
             founder_tier_as_of_date=as_of,
             exchange=candidate.exchange,
+            **_fetch_valuation_for(session_and_crumb, match.ticker),
         )
         db.upsert_company(conn, company)
 
@@ -360,6 +389,11 @@ def run() -> RunSummary:
     db.init_db()
     processed = []
     run_summary = RunSummary(processed_tickers=processed)
+    # Fetched once for the whole run, not once per candidate — see
+    # valuation.get_session_and_crumb()'s docstring. None here (crumb
+    # setup failed) degrades every candidate's valuation fields to their
+    # dataclass defaults (None) rather than failing the run.
+    session_and_crumb = valuation.get_session_and_crumb()
 
     with db.connect() as conn:
         for candidate in TIER1_CANDIDATES:
@@ -506,6 +540,7 @@ def run() -> RunSummary:
                 founder_tier_as_of_date=filing.filing_date,
                 exchange=filing.exchange,
                 sector=filing.sector,
+                **_fetch_valuation_for(session_and_crumb, match.ticker),
             )
             db.upsert_company(conn, company)
 
@@ -540,6 +575,6 @@ def run() -> RunSummary:
 
             processed.append(match.ticker)
 
-        _run_tier2(conn, run_summary, processed)
+        _run_tier2(conn, run_summary, processed, session_and_crumb)
 
     return run_summary

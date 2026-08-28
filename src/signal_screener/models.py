@@ -53,6 +53,20 @@ class Company:
     network_effect_strength: str | None = None
     founder_tier_source: str | None = None  # e.g. SEC filing URL/accession used
     founder_tier_as_of_date: str | None = None
+    # Valuation snapshot (valuation.py) — market_cap/currency above are
+    # reused for this rather than duplicated; the rest are new. All None
+    # for a company valuation.fetch_valuation_metrics() couldn't reach
+    # (never fabricated), and re-fetched fresh on every pipeline run, same
+    # "can go stale, never cached indefinitely" principle as price/
+    # ownership.
+    trailing_pe: float | None = None
+    forward_pe: float | None = None
+    fifty_two_week_low: float | None = None
+    fifty_two_week_high: float | None = None
+    beta: float | None = None
+    dividend_yield_pct: float | None = None
+    valuation_as_of_date: str | None = None
+    valuation_source: str | None = None
 
 
 @dataclass

@@ -166,6 +166,80 @@ def test_notes_render_on_biotech_card(tmp_path, monkeypatch):
     assert "Worth watching the Phase 2 readout." in html_out
 
 
+def test_format_market_cap():
+    from signal_screener.site import _format_market_cap
+
+    assert _format_market_cap(99317571584, "USD") == "99.3B USD"
+    assert _format_market_cap(4098172125184, "HKD") == "4.1T HKD"
+    assert _format_market_cap(500_000_000, "EUR") == "500.0M EUR"
+    assert _format_market_cap(12345, None) == "12,345"
+    assert _format_market_cap(None, "USD") is None
+
+
+def test_founder_card_shows_valuation_metrics_when_present(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="TEST",
+                company_name="Test Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+                market_cap=99317571584,
+                currency="USD",
+                trailing_pe=53.41,
+                forward_pe=34.47,
+                fifty_two_week_low=1495.0,
+                fifty_two_week_high=2548.5,
+                beta=1.312,
+                dividend_yield_pct=None,
+                valuation_as_of_date="2026-08-28",
+                valuation_source="yahoo_finance_quotesummary",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    assert "99.3B USD" in html_out
+    assert "53.4" in html_out  # trailing P/E
+    assert "(fwd 34.5)" in html_out
+    assert "1,495.00" in html_out and "2,548.50" in html_out
+    assert "Beta:</strong> 1.31" in html_out
+    assert "(as of 2026-08-28)" in html_out
+    # No dividend yield on file for this one — must not render a
+    # fabricated 0.00%.
+    assert "Dividend yield" not in html_out
+
+
+def test_founder_card_omits_valuation_block_when_no_data(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="TEST",
+                company_name="Test Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    assert "Test Co" in html_out
+    assert "Market cap" not in html_out
+    assert '<div class="meta valuation">' not in html_out
+
+
 def test_watchlist_section_empty_state(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")

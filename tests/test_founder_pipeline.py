@@ -3,11 +3,13 @@ from unittest.mock import patch
 from signal_screener.founder_pipeline import (
     _apply_recency_rule,
     _effective_transition_date,
+    _fetch_valuation_for,
     _resolve_tier2_ticker,
 )
 from signal_screener.matching.ticker_match import TickerMatch
 from signal_screener.matching.ticker_verify import VerificationResult
 from signal_screener.sources.founder_led_tier2 import Tier2Candidate
+from signal_screener.valuation import ValuationMetrics
 
 
 def test_recent_transition_keeps_founder_chair():
@@ -152,3 +154,52 @@ def test_resolve_tier2_ticker_skips_hint_lookup_when_no_known_ticker_set():
     mock_resolve.assert_called_once_with("Zalando")
     assert match == fallback_match
     assert result == verification
+
+
+def test_fetch_valuation_for_returns_empty_dict_when_session_setup_failed():
+    """valuation.get_session_and_crumb() returning None (the whole run's
+    cookie/crumb dance failed) must degrade every candidate's valuation
+    fields to Company's own None defaults, not raise or skip the
+    candidate entirely — same never-block philosophy as a failed price
+    fetch elsewhere in this pipeline."""
+    assert _fetch_valuation_for(None, "MELI") == {}
+
+
+def test_fetch_valuation_for_returns_empty_dict_when_ticker_fetch_failed():
+    with patch(
+        "signal_screener.founder_pipeline.valuation.fetch_valuation_metrics", return_value=None
+    ):
+        result = _fetch_valuation_for((object(), "crumb123"), "MELI")
+    assert result == {}
+
+
+def test_fetch_valuation_for_maps_metrics_to_company_kwargs():
+    metrics = ValuationMetrics(
+        market_cap=99317571584,
+        currency="USD",
+        trailing_pe=53.41,
+        forward_pe=34.47,
+        fifty_two_week_low=1495.0,
+        fifty_two_week_high=2548.5,
+        beta=1.312,
+        dividend_yield_pct=None,
+        as_of_date="2026-08-28",
+    )
+    with patch(
+        "signal_screener.founder_pipeline.valuation.fetch_valuation_metrics", return_value=metrics
+    ) as mock_fetch:
+        result = _fetch_valuation_for((object(), "crumb123"), "MELI")
+
+    mock_fetch.assert_called_once()
+    assert result == {
+        "market_cap": 99317571584,
+        "currency": "USD",
+        "trailing_pe": 53.41,
+        "forward_pe": 34.47,
+        "fifty_two_week_low": 1495.0,
+        "fifty_two_week_high": 2548.5,
+        "beta": 1.312,
+        "dividend_yield_pct": None,
+        "valuation_as_of_date": "2026-08-28",
+        "valuation_source": "yahoo_finance_quotesummary",
+    }
