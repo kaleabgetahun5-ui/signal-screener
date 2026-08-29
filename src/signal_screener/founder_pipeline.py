@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from signal_screener import db, track_record, valuation
+from signal_screener import backtest, db, track_record, valuation
 from signal_screener.filings import germany, hongkong, korea, netherlands
 from signal_screener.filings.sec_edgar import (
     extract_leadership_excerpt,
@@ -200,7 +200,30 @@ def _fetch_valuation_for(session_and_crumb, ticker: str) -> dict:
     }
 
 
-def _run_tier2(conn, run_summary: RunSummary, processed: list[str], session_and_crumb) -> None:
+def _fetch_backtest_for(sp500_current_price: float | None, ticker: str) -> dict:
+    """Returns Company(**kwargs)-ready IPO-backtest fields — {} (the
+    dataclass's own None defaults apply) if sp500_current_price is None
+    (the once-per-run S&P 500 fetch failed) or the per-ticker backtest
+    itself couldn't be computed (see backtest.compute_backtest's
+    all-or-nothing contract). Only called on each loop's success path,
+    same reasoning as _fetch_valuation_for above."""
+    result = backtest.compute_backtest(ticker, sp500_current_price)
+    if result is None:
+        return {}
+    return {
+        "ipo_date": result.ipo_date,
+        "ipo_price": result.company_ipo_price,
+        "backtest_current_price": result.company_current_price,
+        "sp500_price_at_ipo": result.sp500_price_at_ipo,
+        "sp500_current_price": result.sp500_current_price,
+        "backtest_as_of_date": result.as_of_date,
+        "backtest_source": result.source,
+    }
+
+
+def _run_tier2(
+    conn, run_summary: RunSummary, processed: list[str], session_and_crumb, sp500_current_price
+) -> None:
     """Tier 2 (brief section 3): same match/verify/classify/store shape as
     the Tier 1 loop in run() below, kept as a separate function rather
     than unified with it — filing metadata (form/filing_date/exchange/
@@ -352,6 +375,7 @@ def _run_tier2(conn, run_summary: RunSummary, processed: list[str], session_and_
             founder_tier_as_of_date=as_of,
             exchange=candidate.exchange,
             **_fetch_valuation_for(session_and_crumb, match.ticker),
+            **_fetch_backtest_for(sp500_current_price, match.ticker),
         )
         db.upsert_company(conn, company)
 
@@ -394,6 +418,11 @@ def run() -> RunSummary:
     # setup failed) degrades every candidate's valuation fields to their
     # dataclass defaults (None) rather than failing the run.
     session_and_crumb = valuation.get_session_and_crumb()
+    # Same "fetch once, reuse for every candidate" reasoning — it's the
+    # same S&P 500 quote regardless of which company is being backtested.
+    # None here degrades every candidate's backtest fields to their
+    # dataclass defaults rather than failing the run.
+    sp500_current_price = backtest.get_current_price(backtest.SP500_TICKER)
 
     with db.connect() as conn:
         for candidate in TIER1_CANDIDATES:
@@ -541,6 +570,7 @@ def run() -> RunSummary:
                 exchange=filing.exchange,
                 sector=filing.sector,
                 **_fetch_valuation_for(session_and_crumb, match.ticker),
+                **_fetch_backtest_for(sp500_current_price, match.ticker),
             )
             db.upsert_company(conn, company)
 
@@ -575,6 +605,6 @@ def run() -> RunSummary:
 
             processed.append(match.ticker)
 
-        _run_tier2(conn, run_summary, processed, session_and_crumb)
+        _run_tier2(conn, run_summary, processed, session_and_crumb, sp500_current_price)
 
     return run_summary

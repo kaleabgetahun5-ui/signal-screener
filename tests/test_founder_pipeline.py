@@ -1,8 +1,10 @@
 from unittest.mock import patch
 
+from signal_screener.backtest import BacktestResult
 from signal_screener.founder_pipeline import (
     _apply_recency_rule,
     _effective_transition_date,
+    _fetch_backtest_for,
     _fetch_valuation_for,
     _resolve_tier2_ticker,
 )
@@ -202,4 +204,49 @@ def test_fetch_valuation_for_maps_metrics_to_company_kwargs():
         "dividend_yield_pct": None,
         "valuation_as_of_date": "2026-08-28",
         "valuation_source": "yahoo_finance_quotesummary",
+    }
+
+
+def test_fetch_backtest_for_returns_empty_dict_when_sp500_price_missing():
+    """backtest.get_current_price(SP500_TICKER) returning None (the
+    whole run's S&P 500 fetch failed) must degrade every candidate's
+    backtest fields to Company's own None defaults, not raise or skip
+    the candidate entirely."""
+    assert _fetch_backtest_for(None, "MELI") == {}
+
+
+def test_fetch_backtest_for_returns_empty_dict_when_compute_failed():
+    with patch(
+        "signal_screener.founder_pipeline.backtest.compute_backtest", return_value=None
+    ):
+        result = _fetch_backtest_for(7711.76, "MELI")
+    assert result == {}
+
+
+def test_fetch_backtest_for_maps_result_to_company_kwargs():
+    result = BacktestResult(
+        ipo_date="2007-08-10",
+        company_ipo_price=28.5,
+        company_current_price=1966.25,
+        company_currency="USD",
+        company_growth_multiple=69.0,
+        sp500_price_at_ipo=1453.64,
+        sp500_current_price=7711.76,
+        sp500_growth_multiple=5.3,
+        as_of_date="2026-08-28",
+    )
+    with patch(
+        "signal_screener.founder_pipeline.backtest.compute_backtest", return_value=result
+    ) as mock_compute:
+        mapped = _fetch_backtest_for(7711.76, "MELI")
+
+    mock_compute.assert_called_once_with("MELI", 7711.76)
+    assert mapped == {
+        "ipo_date": "2007-08-10",
+        "ipo_price": 28.5,
+        "backtest_current_price": 1966.25,
+        "sp500_price_at_ipo": 1453.64,
+        "sp500_current_price": 7711.76,
+        "backtest_as_of_date": "2026-08-28",
+        "backtest_source": "yahoo_finance_chart",
     }

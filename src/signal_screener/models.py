@@ -67,6 +67,19 @@ class Company:
     dividend_yield_pct: float | None = None
     valuation_as_of_date: str | None = None
     valuation_source: str | None = None
+    # IPO backtest (backtest.py) — "$100 at IPO vs. S&P 500," site.py's own
+    # module docstring's long-deferred feature. currency above is reused
+    # for ipo_price/backtest_current_price (a stock only ever trades in
+    # one currency). Never fabricated (None if backtest.compute_backtest()
+    # couldn't derive every input) and re-fetched fresh every run, same
+    # rationale as the valuation fields above.
+    ipo_date: str | None = None
+    ipo_price: float | None = None
+    backtest_current_price: float | None = None
+    sp500_price_at_ipo: float | None = None
+    sp500_current_price: float | None = None
+    backtest_as_of_date: str | None = None
+    backtest_source: str | None = None
 
 
 @dataclass

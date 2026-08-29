@@ -4,16 +4,17 @@ nefl-screener-v1.html) — same fonts, colors, card layout, flag pills, and
 verify-link rows, but driven by real pipeline data instead of hand-written
 examples.
 
-Two things the demos had that this page deliberately omits, because the
-data doesn't exist yet:
-  - The "$100 at IPO vs. S&P 500" backtest bars (nefl-screener-v1.html) —
-    needs the `price_history` table, which isn't built (MVP roadmap step 6
-    is the track-record checker; a backtest view isn't scheduled yet).
-  - The "why this is worth a closer look" growth/analyst/bull-bear block
-    (brief section 7) — needs real growth data, analyst targets, and news,
-    none of which this pipeline pulls. Fabricating that content would
-    violate the project's own guardrail against inventing facts not
-    present in the input, so it's left out rather than faked.
+One thing the demos had that this page still deliberately omits, because
+the data doesn't exist yet: the "why this is worth a closer look"
+growth/analyst/bull-bear block (brief section 7) — needs real growth
+data, analyst targets, and news, none of which this pipeline pulls.
+Fabricating that content would violate the project's own guardrail
+against inventing facts not present in the input, so it's left out
+rather than faked.
+
+The "$100 at IPO vs. S&P 500" backtest bars (nefl-screener-v1.html),
+previously deferred for the same reason (no historical price data
+source), are now built — see backtest.py and _backtest_html() below.
 
 What IS real and shown: for biotech entries, the company name as originally
 submitted (not the resolved match, which can be wrong — see db.py's
@@ -65,6 +66,7 @@ CSS = """
     --verify:#9C6B1F;
     --delisted:#5B3A8E; --delisted-bg:#EEE7F7;
     --arbitrary:#1C5D8C; --arbitrary-bg:#E3EEF7;
+    --bar-track:#EDF1F0; --bar-stock:#1F7A5C; --bar-index:#8B95A1;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans', sans-serif; padding:40px 20px 80px;}
@@ -117,6 +119,17 @@ CSS = """
   .verify-note{font-size:12.5px; color:var(--verify); font-style:italic;}
   .delisted-note{font-size:13px; color:var(--delisted); line-height:1.5; margin:0 22px 14px; padding:10px 12px; background:var(--delisted-bg); border-radius:6px;}
   .card.with-tab .delisted-note{margin:0 22px 14px;}
+
+  .backtest{background:var(--bg); margin:0 0 14px; border-radius:6px; padding:16px 18px;}
+  .backtest-title{font-family:'IBM Plex Mono', monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:12px;}
+  .bt-row{display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:13px;}
+  .bt-label{width:110px; flex-shrink:0; color:var(--ink-soft);}
+  .bt-track{flex:1; background:var(--bar-track); border-radius:4px; height:10px; overflow:hidden; border:1px solid var(--line);}
+  .bt-fill{height:100%; border-radius:4px;}
+  .bt-fill.stock{background:var(--bar-stock);}
+  .bt-fill.index{background:var(--bar-index);}
+  .bt-value{width:90px; text-align:right; font-family:'IBM Plex Mono', monospace; font-size:12.5px; flex-shrink:0;}
+  .bt-note{font-size:11.5px; color:var(--ink-soft); margin-top:8px; line-height:1.5;}
 
   .notes{border-top:1px dashed var(--line); padding-top:12px; margin:0 22px 14px; font-size:13.5px; color:var(--ink);}
   .card.with-tab .notes{margin:0 22px 14px;}
@@ -299,6 +312,81 @@ def _valuation_html(row) -> str:
     return f'<div class="meta valuation">{" · ".join(parts)}{as_of_html}</div>'
 
 
+def _format_backtest_value(value: float, currency: str) -> str:
+    return f"~${value:,.0f}" if currency == "USD" else f"~{value:,.0f} {currency}"
+
+
+def _backtest_html(row) -> str:
+    """Roadmap extra: "$100 at IPO vs. S&P 500" — the exact feature this
+    module's own docstring long named as deliberately deferred, now built
+    off backtest.py. Reuses nefl-screener-v1.html's original bar-chart
+    markup (.backtest/.bt-row/.bt-track/.bt-fill) rather than inventing a
+    new visual language for it — same "matching the site's existing
+    style" the rest of this page already follows.
+
+    A growth *multiple* is currency-invariant, but the two "$100 grew to
+    $X" bars aren't literally comparable dollar-for-dollar when the
+    company doesn't trade in USD — the note below says so explicitly
+    for a non-USD company rather than silently implying FX-adjustment
+    this project doesn't do (see backtest.py's module docstring).
+
+    Returns "" if the backtest couldn't be computed for this row (see
+    backtest.compute_backtest's all-or-nothing contract) — e.g. a
+    company whose valuation/backtest fetch failed outright, or a
+    delisted/acquired one that never had this fetched in the first
+    place.
+    """
+    ipo_date = row["ipo_date"]
+    ipo_price = row["ipo_price"]
+    current_price = row["backtest_current_price"]
+    sp500_price_at_ipo = row["sp500_price_at_ipo"]
+    sp500_current_price = row["sp500_current_price"]
+
+    if None in (ipo_date, ipo_price, current_price, sp500_price_at_ipo, sp500_current_price):
+        return ""
+
+    currency = row["currency"] or "USD"
+    company_value = 100 * (current_price / ipo_price)
+    sp500_value = 100 * (sp500_current_price / sp500_price_at_ipo)
+    max_value = max(company_value, sp500_value)
+    company_width = round(company_value / max_value * 100, 1)
+    sp500_width = round(sp500_value / max_value * 100, 1)
+
+    ticker = html.escape(row["ticker"])
+    ipo_date_display = html.escape(ipo_date)
+    as_of = html.escape(row["backtest_as_of_date"] or "")
+    currency_label = "$" if currency == "USD" else f"{html.escape(currency)} "
+
+    note = (
+        f"Based on {ticker} at {currency_label}{current_price:,.2f} "
+        f"(as of {as_of}) vs. {currency_label}{ipo_price:,.2f} at IPO; "
+        f"S&amp;P 500 at ${sp500_current_price:,.2f} today vs. ${sp500_price_at_ipo:,.2f} on "
+        f"{ipo_date_display}. Price appreciation only — dividends not included on either side."
+    )
+    if currency != "USD":
+        note += (
+            f' The {ticker} figures are in {html.escape(currency)}, the S&amp;P 500 figures in '
+            "USD — not adjusted for exchange-rate movement, so these show each investment's own "
+            "growth in its own currency, not a literal side-by-side dollar comparison."
+        )
+
+    return f"""
+  <div class="backtest">
+    <div class="backtest-title">$100 invested at IPO ({ipo_date_display}) vs. S&amp;P 500</div>
+    <div class="bt-row">
+      <div class="bt-label">{ticker}</div>
+      <div class="bt-track"><div class="bt-fill stock" style="width:{company_width}%"></div></div>
+      <div class="bt-value">{_format_backtest_value(company_value, currency)}</div>
+    </div>
+    <div class="bt-row">
+      <div class="bt-label">S&amp;P 500</div>
+      <div class="bt-track"><div class="bt-fill index" style="width:{sp500_width}%"></div></div>
+      <div class="bt-value">{_format_backtest_value(sp500_value, "USD")}</div>
+    </div>
+    <div class="bt-note">{note}</div>
+  </div>"""
+
+
 def _render_founder_card(row, ownership, notes=()) -> str:
     verified = bool(row["ticker_verified"])
     delisted = bool(row["delisted_or_acquired"])
@@ -357,6 +445,7 @@ def _render_founder_card(row, ownership, notes=()) -> str:
     delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
     notes_html = _notes_html(notes)
     valuation_html = _valuation_html(row)
+    backtest_html = _backtest_html(row)
 
     ticker_display = f"{exchange}: {ticker}" if exchange else ticker
 
@@ -372,6 +461,7 @@ def _render_founder_card(row, ownership, notes=()) -> str:
       {valuation_html}
       <div class="read">{read_text}</div>
       {delisted_html}
+      {backtest_html}
       {notes_html}
     </div>
     <div class="verify-row">

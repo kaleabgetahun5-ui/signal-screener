@@ -59,7 +59,17 @@ CREATE TABLE IF NOT EXISTS companies (
     beta REAL,
     dividend_yield_pct REAL,
     valuation_as_of_date TEXT,
-    valuation_source TEXT
+    valuation_source TEXT,
+    -- IPO backtest (backtest.py) — see models.py's Company for the same
+    -- "never fabricated, re-fetched fresh every run" contract; currency
+    -- above is reused (a stock only ever trades in one currency).
+    ipo_date TEXT,
+    ipo_price REAL,
+    backtest_current_price REAL,
+    sp500_price_at_ipo REAL,
+    sp500_current_price REAL,
+    backtest_as_of_date TEXT,
+    backtest_source TEXT
 );
 
 -- Append-only: one row per (re-)classification run, so founder ownership
@@ -245,6 +255,13 @@ _MIGRATIONS = [
     ("companies", "dividend_yield_pct", "REAL"),
     ("companies", "valuation_as_of_date", "TEXT"),
     ("companies", "valuation_source", "TEXT"),
+    ("companies", "ipo_date", "TEXT"),
+    ("companies", "ipo_price", "REAL"),
+    ("companies", "backtest_current_price", "REAL"),
+    ("companies", "sp500_price_at_ipo", "REAL"),
+    ("companies", "sp500_current_price", "REAL"),
+    ("companies", "backtest_as_of_date", "TEXT"),
+    ("companies", "backtest_source", "TEXT"),
 ]
 
 
@@ -298,8 +315,13 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             founder_name, network_effect, network_effect_strength, founder_tier_source,
             founder_tier_as_of_date, delisted_or_acquired, first_seen_at,
             trailing_pe, forward_pe, fifty_two_week_low, fifty_two_week_high, beta,
-            dividend_yield_pct, valuation_as_of_date, valuation_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            dividend_yield_pct, valuation_as_of_date, valuation_source,
+            ipo_date, ipo_price, backtest_current_price, sp500_price_at_ipo,
+            sp500_current_price, backtest_as_of_date, backtest_source
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?
+        )
         ON CONFLICT(ticker) DO UPDATE SET
             company_name=excluded.company_name,
             exchange=excluded.exchange,
@@ -327,7 +349,14 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             beta=excluded.beta,
             dividend_yield_pct=excluded.dividend_yield_pct,
             valuation_as_of_date=excluded.valuation_as_of_date,
-            valuation_source=excluded.valuation_source
+            valuation_source=excluded.valuation_source,
+            ipo_date=excluded.ipo_date,
+            ipo_price=excluded.ipo_price,
+            backtest_current_price=excluded.backtest_current_price,
+            sp500_price_at_ipo=excluded.sp500_price_at_ipo,
+            sp500_current_price=excluded.sp500_current_price,
+            backtest_as_of_date=excluded.backtest_as_of_date,
+            backtest_source=excluded.backtest_source
         """,
         (
             company.ticker,
@@ -359,6 +388,13 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             company.dividend_yield_pct,
             company.valuation_as_of_date,
             company.valuation_source,
+            company.ipo_date,
+            company.ipo_price,
+            company.backtest_current_price,
+            company.sp500_price_at_ipo,
+            company.sp500_current_price,
+            company.backtest_as_of_date,
+            company.backtest_source,
         ),
     )
 

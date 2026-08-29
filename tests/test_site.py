@@ -240,6 +240,101 @@ def test_founder_card_omits_valuation_block_when_no_data(tmp_path, monkeypatch):
     assert '<div class="meta valuation">' not in html_out
 
 
+def test_founder_card_shows_backtest_bars_when_present(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="TEST",
+                company_name="Test Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+                currency="USD",
+                ipo_date="2007-08-10",
+                ipo_price=28.5,
+                backtest_current_price=1966.25,
+                sp500_price_at_ipo=1453.64,
+                sp500_current_price=7711.76,
+                backtest_as_of_date="2026-08-28",
+                backtest_source="yahoo_finance_chart",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    assert '<div class="backtest">' in html_out
+    assert "$100 invested at IPO (2007-08-10) vs. S&amp;P 500" in html_out
+    assert "TEST" in html_out
+    # 1966.25/28.5 * 100 ≈ 6899 (the larger of the two -> full-width bar)
+    assert "~$6,899" in html_out
+    # 7711.76/1453.64 * 100 ≈ 531 (the smaller -> proportionally narrower)
+    assert "~$531" in html_out
+    assert 'style="width:100.0%"' in html_out
+    assert "dividends not included" in html_out
+    # Same currency (USD) on both sides — no FX caveat needed.
+    assert "not adjusted for exchange-rate" not in html_out
+
+
+def test_founder_card_backtest_notes_fx_caveat_for_non_usd_company(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="0700.HK",
+                company_name="Tencent Holdings",
+                ticker_verified=True,
+                listing_type="primary",
+                founder_tier="Founder-CEO",
+                currency="HKD",
+                ipo_date="2004-06-16",
+                ipo_price=0.765,
+                backtest_current_price=455.2,
+                sp500_price_at_ipo=1133.56,
+                sp500_current_price=7711.76,
+                backtest_as_of_date="2026-08-28",
+                backtest_source="yahoo_finance_chart",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    assert "not adjusted for exchange-rate movement" in html_out
+    # The company's own bar value is labeled in HKD, not implied USD.
+    assert "HKD" in html_out
+    assert "~$" in html_out  # S&P 500's bar is still USD-labeled
+
+
+def test_founder_card_omits_backtest_block_when_no_data(tmp_path, monkeypatch):
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="TEST",
+                company_name="Test Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    assert '<div class="backtest">' not in html_out
+
+
 def test_watchlist_section_empty_state(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")
