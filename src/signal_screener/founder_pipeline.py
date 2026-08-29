@@ -8,14 +8,23 @@ Runs the founder-led subset of the project brief's pipeline (section 4):
      same matching/ticker_verify.py, mandatory, never silently trusted
   4. Classify founder status into exactly one tier (Founder-CEO /
      Founder-Chair / Founder-departed), pulled from a real SEC filing,
-     never inferred or guessed. Re-run every pipeline run, since both the
-     title and the ownership stake can change over time.
+     never inferred or guessed. The filing/excerpt is re-fetched and
+     re-checked every pipeline run, since both the title and the
+     ownership stake can change over time — but the Claude extraction
+     call itself (step 6) is only re-run when that excerpt has actually
+     changed since the last run (see _founder_extraction_fingerprint),
+     not unconditionally, so a daily schedule doesn't mean re-billing an
+     identical call for a filing that hasn't changed. The recency rule
+     (Founder-Chair aging into Founder-departed) still re-evaluates every
+     run regardless, since that's a function of elapsed time, not of
+     whether the excerpt changed.
   5. Pull ownership detail from the filing (Form 20-F / DEF 14A)
   6. Generate the founder-led/network-effect extraction via Claude
      (section 5's prompt)
   7. Store everything, with source + as-of date on every record
 """
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -52,6 +61,10 @@ class RunSummary:
     unverified_tickers: int = 0
     filing_lookup_failures: int = 0
     extraction_failures: int = 0
+    # Cache hits (_founder_extraction_fingerprint unchanged since the last
+    # run with a real classification) — see pipeline.RunSummary.
+    # summaries_reused for the biotech-side twin of this.
+    extractions_reused: int = 0
     # Not a failure — see pipeline.RunSummary.delisted_or_acquired.
     delisted_or_acquired: int = 0
 
@@ -64,9 +77,19 @@ class RunSummary:
             f"{len(self.processed_tickers)} processed, {self.failure_count} failure(s): "
             f"{self.unverified_tickers} unverified ticker(s), "
             f"{self.filing_lookup_failures} filing lookup failure(s), "
-            f"{self.extraction_failures} founder extraction failure(s) "
+            f"{self.extraction_failures} founder extraction failure(s), "
+            f"{self.extractions_reused} extraction(s) reused unchanged "
             f"| {self.delisted_or_acquired} delisted/acquired (not a failure)"
         )
+
+
+def _founder_extraction_fingerprint(company_name: str, excerpt: str) -> str:
+    """Hash of everything extract_founder_status() actually sees. Compared
+    against the previous run's stored fingerprint (companies.
+    founder_extraction_fingerprint) before calling Claude again — see that
+    column's schema comment for why this exists (daily schedule, same
+    filing/board-page excerpt most days)."""
+    return hashlib.sha1(f"{company_name}|{excerpt}".encode("utf-8")).hexdigest()
 
 
 def _months_since(iso_date: str) -> float | None:
@@ -318,44 +341,77 @@ def _run_tier2(
             run_summary.filing_lookup_failures += 1
             continue
 
-        try:
-            extraction = extract_founder_status(
-                company_name=candidate.company_name, report_excerpt=excerpt
-            )
-        except Exception:
-            logger.exception("Founder extraction failed for %s", match.ticker)
-            db.upsert_company(
-                conn,
-                Company(
-                    ticker=match.ticker,
-                    company_name=match.matched_company_name,
-                    country=candidate.country,
-                    founder_tier="N/A",
-                    listing_type="primary",
-                    ticker_verified=verification.verified,
-                    ticker_verification_source=verification.source,
-                    ticker_verification_date=verification.checked_date,
-                    ticker_verification_reason=verification.reason,
-                    ticker_match_confidence=match.confidence,
-                    founder_name=candidate.founder_name,
-                    founder_tier_source=_tier2_source_citation(candidate),
-                    founder_tier_as_of_date=date.today().isoformat(),
-                    exchange=candidate.exchange,
-                ),
-            )
-            processed.append(match.ticker)
-            run_summary.extraction_failures += 1
-            continue
-
-        effective_transition_date = _effective_transition_date(candidate, extraction.transition_date)
-        final_tier, override_reason = _apply_recency_rule(
-            extraction.founder_tier, effective_transition_date
+        source_citation = _tier2_source_citation(candidate)
+        fingerprint = _founder_extraction_fingerprint(candidate.company_name, excerpt)
+        existing = db.get_company(conn, match.ticker)
+        cache_hit = bool(
+            existing
+            and existing["founder_tier"] not in (None, "N/A")
+            and existing["founder_extraction_fingerprint"] == fingerprint
         )
+
+        if cache_hit:
+            # Nothing Claude would see (company name + excerpt) has
+            # changed since the last real classification — reuse it
+            # rather than re-billing an identical call. The recency rule
+            # still re-runs fresh below regardless: a Founder-Chair can
+            # age into Founder-departed purely from elapsed time, on a
+            # day the excerpt (and so this fingerprint) hasn't changed at
+            # all — see companies.founder_transition_date's schema comment.
+            #
+            # founder_tier_source/as_of still use today's freshly-fetched
+            # excerpt/source_citation, not the stale stored ones — the
+            # source *was* actively re-checked today (that's how the
+            # fingerprint match was established), only the Claude call
+            # itself was skipped, so "as of today" is accurate here too.
+            transition_date = existing["founder_transition_date"]
+            network_effect = existing["network_effect"]
+            network_effect_strength = existing["network_effect_strength"]
+            founder_tier_source = source_citation
+            as_of = date.today().isoformat()
+            final_tier, override_reason = _apply_recency_rule(
+                existing["founder_tier"], transition_date
+            )
+            run_summary.extractions_reused += 1
+        else:
+            try:
+                extraction = extract_founder_status(
+                    company_name=candidate.company_name, report_excerpt=excerpt
+                )
+            except Exception:
+                logger.exception("Founder extraction failed for %s", match.ticker)
+                db.upsert_company(
+                    conn,
+                    Company(
+                        ticker=match.ticker,
+                        company_name=match.matched_company_name,
+                        country=candidate.country,
+                        founder_tier="N/A",
+                        listing_type="primary",
+                        ticker_verified=verification.verified,
+                        ticker_verification_source=verification.source,
+                        ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
+                        ticker_match_confidence=match.confidence,
+                        founder_name=candidate.founder_name,
+                        founder_tier_source=source_citation,
+                        founder_tier_as_of_date=date.today().isoformat(),
+                        exchange=candidate.exchange,
+                    ),
+                )
+                processed.append(match.ticker)
+                run_summary.extraction_failures += 1
+                continue
+
+            transition_date = _effective_transition_date(candidate, extraction.transition_date)
+            final_tier, override_reason = _apply_recency_rule(extraction.founder_tier, transition_date)
+            network_effect = extraction.network_effect
+            network_effect_strength = extraction.network_effect_strength
+            founder_tier_source = source_citation
+            as_of = date.today().isoformat()
+
         if override_reason:
             logger.info("%s: %s", match.ticker, override_reason)
-
-        source_citation = _tier2_source_citation(candidate)
-        as_of = date.today().isoformat()
 
         company = Company(
             ticker=match.ticker,
@@ -369,31 +425,37 @@ def _run_tier2(
             ticker_verification_reason=verification.reason,
             ticker_match_confidence=match.confidence,
             founder_name=candidate.founder_name,
-            network_effect=extraction.network_effect,
-            network_effect_strength=extraction.network_effect_strength,
-            founder_tier_source=source_citation,
+            network_effect=network_effect,
+            network_effect_strength=network_effect_strength,
+            founder_tier_source=founder_tier_source,
             founder_tier_as_of_date=as_of,
             exchange=candidate.exchange,
+            founder_extraction_fingerprint=fingerprint,
+            founder_transition_date=transition_date,
             **_fetch_valuation_for(session_and_crumb, match.ticker),
             **_fetch_backtest_for(sp500_current_price, match.ticker),
         )
         db.upsert_company(conn, company)
 
-        db.insert_ownership(
-            conn,
-            Ownership(
-                ticker=match.ticker,
-                founder_name=candidate.founder_name,
-                role=extraction.leadership_status,
-                ownership_pct=extraction.ownership_pct_numeric,
-                source=source_citation,
-                as_of_date=as_of,
-            ),
-        )
+        if not cache_hit:
+            # Append-only history (ownership table's own schema comment)
+            # — only worth a new row when the extraction actually ran and
+            # could have produced a different value; an unchanged cache
+            # hit would just duplicate the last row with a later as_of_date
+            # and no new information.
+            db.insert_ownership(
+                conn,
+                Ownership(
+                    ticker=match.ticker,
+                    founder_name=candidate.founder_name,
+                    role=extraction.leadership_status,
+                    ownership_pct=extraction.ownership_pct_numeric,
+                    source=source_citation,
+                    as_of_date=as_of,
+                ),
+            )
 
-        founder_flag = track_record.derive_founder_flag(
-            final_tier, extraction.network_effect_strength
-        )
+        founder_flag = track_record.derive_founder_flag(final_tier, network_effect_strength)
         if founder_flag:
             track_record.flag_entry(
                 conn,
@@ -515,39 +577,69 @@ def run() -> RunSummary:
             text = fetch_filing_text(filing.document_url)
             excerpt = extract_leadership_excerpt(text, candidate.founder_name)
 
-            try:
-                extraction = extract_founder_status(
-                    company_name=candidate.company_name, report_excerpt=excerpt
-                )
-            except Exception:
-                logger.exception("Founder extraction failed for %s", match.ticker)
-                db.upsert_company(
-                    conn,
-                    Company(
-                        ticker=match.ticker,
-                        company_name=match.matched_company_name,
-                        country=candidate.country,
-                        founder_tier="N/A",
-                        listing_type="ADR",
-                        ticker_verified=verification.verified,
-                        ticker_verification_source=verification.source,
-                        ticker_verification_date=verification.checked_date,
-                        ticker_verification_reason=verification.reason,
-                        ticker_match_confidence=match.confidence,
-                        founder_name=candidate.founder_name,
-                        founder_tier_source=f"{filing.form}:{filing.document_url}",
-                        founder_tier_as_of_date=filing.filing_date,
-                        exchange=filing.exchange,
-                        sector=filing.sector,
-                    ),
-                )
-                processed.append(match.ticker)
-                run_summary.extraction_failures += 1
-                continue
-
-            final_tier, override_reason = _apply_recency_rule(
-                extraction.founder_tier, extraction.transition_date
+            source_citation = f"{filing.form}:{filing.document_url}"
+            fingerprint = _founder_extraction_fingerprint(candidate.company_name, excerpt)
+            existing = db.get_company(conn, match.ticker)
+            cache_hit = bool(
+                existing
+                and existing["founder_tier"] not in (None, "N/A")
+                and existing["founder_extraction_fingerprint"] == fingerprint
             )
+
+            if cache_hit:
+                # Same reasoning as _run_tier2's cache-hit branch: nothing
+                # Claude would see has changed (same filing, same excerpt
+                # text), so reuse the last real classification rather than
+                # re-billing an identical call. The recency rule still
+                # re-runs fresh below — see companies.founder_transition_date's
+                # schema comment. source/as_of use today's freshly-fetched
+                # filing metadata either way, so no special-casing needed
+                # for those here (a genuinely new filing would change the
+                # excerpt text too, which would already show up as a cache
+                # miss above).
+                transition_date = existing["founder_transition_date"]
+                network_effect = existing["network_effect"]
+                network_effect_strength = existing["network_effect_strength"]
+                final_tier, override_reason = _apply_recency_rule(
+                    existing["founder_tier"], transition_date
+                )
+                run_summary.extractions_reused += 1
+            else:
+                try:
+                    extraction = extract_founder_status(
+                        company_name=candidate.company_name, report_excerpt=excerpt
+                    )
+                except Exception:
+                    logger.exception("Founder extraction failed for %s", match.ticker)
+                    db.upsert_company(
+                        conn,
+                        Company(
+                            ticker=match.ticker,
+                            company_name=match.matched_company_name,
+                            country=candidate.country,
+                            founder_tier="N/A",
+                            listing_type="ADR",
+                            ticker_verified=verification.verified,
+                            ticker_verification_source=verification.source,
+                            ticker_verification_date=verification.checked_date,
+                            ticker_verification_reason=verification.reason,
+                            ticker_match_confidence=match.confidence,
+                            founder_name=candidate.founder_name,
+                            founder_tier_source=source_citation,
+                            founder_tier_as_of_date=filing.filing_date,
+                            exchange=filing.exchange,
+                            sector=filing.sector,
+                        ),
+                    )
+                    processed.append(match.ticker)
+                    run_summary.extraction_failures += 1
+                    continue
+
+                transition_date = extraction.transition_date
+                final_tier, override_reason = _apply_recency_rule(extraction.founder_tier, transition_date)
+                network_effect = extraction.network_effect
+                network_effect_strength = extraction.network_effect_strength
+
             if override_reason:
                 logger.info("%s: %s", match.ticker, override_reason)
 
@@ -563,37 +655,41 @@ def run() -> RunSummary:
                 ticker_verification_reason=verification.reason,
                 ticker_match_confidence=match.confidence,
                 founder_name=candidate.founder_name,
-                network_effect=extraction.network_effect,
-                network_effect_strength=extraction.network_effect_strength,
-                founder_tier_source=f"{filing.form}:{filing.document_url}",
+                network_effect=network_effect,
+                network_effect_strength=network_effect_strength,
+                founder_tier_source=source_citation,
                 founder_tier_as_of_date=filing.filing_date,
                 exchange=filing.exchange,
                 sector=filing.sector,
+                founder_extraction_fingerprint=fingerprint,
+                founder_transition_date=transition_date,
                 **_fetch_valuation_for(session_and_crumb, match.ticker),
                 **_fetch_backtest_for(sp500_current_price, match.ticker),
             )
             db.upsert_company(conn, company)
 
-            db.insert_ownership(
-                conn,
-                Ownership(
-                    ticker=match.ticker,
-                    founder_name=candidate.founder_name,
-                    role=extraction.leadership_status,
-                    ownership_pct=extraction.ownership_pct_numeric,
-                    source=f"{filing.form}:{filing.document_url}",
-                    as_of_date=filing.filing_date,
-                ),
-            )
+            if not cache_hit:
+                # Append-only history — only worth a new row when the
+                # extraction actually ran (see _run_tier2's matching
+                # comment for the full reasoning).
+                db.insert_ownership(
+                    conn,
+                    Ownership(
+                        ticker=match.ticker,
+                        founder_name=candidate.founder_name,
+                        role=extraction.leadership_status,
+                        ownership_pct=extraction.ownership_pct_numeric,
+                        source=source_citation,
+                        as_of_date=filing.filing_date,
+                    ),
+                )
 
             # Roadmap step 6: track record trigger (see track_record.py's
             # derive_founder_flag for the rule). entry_id is the ticker —
             # same convention user_notes already uses for founder-led
             # entries, since a founder-led company doesn't have a separate
             # designation_id-style identifier.
-            founder_flag = track_record.derive_founder_flag(
-                final_tier, extraction.network_effect_strength
-            )
+            founder_flag = track_record.derive_founder_flag(final_tier, network_effect_strength)
             if founder_flag:
                 track_record.flag_entry(
                     conn,

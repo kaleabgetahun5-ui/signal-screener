@@ -45,6 +45,10 @@ class RunSummary:
     unverified_tickers: int = 0
     trial_lookup_failures: int = 0
     summarization_failures: int = 0
+    # Cache hits (_summary_input_fingerprint unchanged since the last run
+    # with a real summary) — not a failure, but worth surfacing so a
+    # daily run's Claude-call volume is visible rather than assumed.
+    summaries_reused: int = 0
     # Not a failure — a confirmed real-world status change (brief section
     # 4). Tracked and reported, but deliberately excluded from
     # failure_count: counting it as one would misrepresent a correctly-
@@ -60,9 +64,25 @@ class RunSummary:
             f"{len(self.processed_ids)} processed, {self.failure_count} failure(s): "
             f"{self.unverified_tickers} unverified ticker(s), "
             f"{self.trial_lookup_failures} trial lookup failure(s), "
-            f"{self.summarization_failures} summarization failure(s) "
+            f"{self.summarization_failures} summarization failure(s), "
+            f"{self.summaries_reused} summary/summaries reused unchanged "
             f"| {self.delisted_or_acquired} delisted/acquired (not a failure)"
         )
+
+
+def _summary_input_fingerprint(
+    *, drug_name, company_name, ticker, designation_type, date_granted, indication, phase, status
+) -> str:
+    """Hash of every input summarize_designation() actually sees. Compared
+    against the previous run's stored fingerprint (designations.
+    summary_input_fingerprint) before calling Claude again — see that
+    column's schema comment for why this exists (daily schedule, same
+    facts most days)."""
+    key = "|".join(
+        str(x)
+        for x in (drug_name, company_name, ticker, designation_type, date_granted, indication, phase, status)
+    )
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
 def _designation_id(raw) -> str:
@@ -147,6 +167,7 @@ def run(*, generate_summaries: bool = True) -> RunSummary:
                     logger.warning("No ClinicalTrials.gov record for %s", raw.trial_id)
 
             designation_id = _designation_id(raw)
+            existing = db.get_designation(conn, designation_id)
             designation = Designation(
                 designation_id=designation_id,
                 ticker=company.ticker,
@@ -163,25 +184,51 @@ def run(*, generate_summaries: bool = True) -> RunSummary:
             )
 
             if generate_summaries:
-                try:
-                    summary = summarize_designation(
-                        drug_name=raw.drug_name,
-                        company_name=company.company_name,
-                        ticker=company.ticker,
-                        designation_type=raw.type,
-                        date_granted=raw.date_granted,
-                        indication=raw.indication,
-                        phase=trial.phase if trial else None,
-                        status=trial.status if trial else None,
-                    )
-                    designation.summary_text = summary.full_text
-                    designation.summary_confidence_flag = summary.confidence_flag
-                    designation.summary_generated_at = summary.generated_at
-                except Exception:
-                    logger.exception(
-                        "Summarization failed for designation_id=%s", designation_id
-                    )
-                    run_summary.summarization_failures += 1
+                fingerprint = _summary_input_fingerprint(
+                    drug_name=raw.drug_name,
+                    company_name=company.company_name,
+                    ticker=company.ticker,
+                    designation_type=raw.type,
+                    date_granted=raw.date_granted,
+                    indication=raw.indication,
+                    phase=trial.phase if trial else None,
+                    status=trial.status if trial else None,
+                )
+                if (
+                    existing
+                    and existing["summary_text"]
+                    and existing["summary_input_fingerprint"] == fingerprint
+                ):
+                    # Nothing Claude would see has changed since the summary
+                    # on file was generated — reuse it as-is rather than
+                    # re-billing an identical call (see db.py's
+                    # summary_input_fingerprint schema comment).
+                    designation.summary_text = existing["summary_text"]
+                    designation.summary_confidence_flag = existing["summary_confidence_flag"]
+                    designation.summary_generated_at = existing["summary_generated_at"]
+                    designation.summary_input_fingerprint = fingerprint
+                    run_summary.summaries_reused += 1
+                else:
+                    try:
+                        summary = summarize_designation(
+                            drug_name=raw.drug_name,
+                            company_name=company.company_name,
+                            ticker=company.ticker,
+                            designation_type=raw.type,
+                            date_granted=raw.date_granted,
+                            indication=raw.indication,
+                            phase=trial.phase if trial else None,
+                            status=trial.status if trial else None,
+                        )
+                        designation.summary_text = summary.full_text
+                        designation.summary_confidence_flag = summary.confidence_flag
+                        designation.summary_generated_at = summary.generated_at
+                        designation.summary_input_fingerprint = fingerprint
+                    except Exception:
+                        logger.exception(
+                            "Summarization failed for designation_id=%s", designation_id
+                        )
+                        run_summary.summarization_failures += 1
 
             db.upsert_designation(conn, designation)
             processed_ids.append(designation_id)

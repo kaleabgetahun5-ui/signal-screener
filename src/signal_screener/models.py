@@ -80,6 +80,11 @@ class Company:
     sp500_current_price: float | None = None
     backtest_as_of_date: str | None = None
     backtest_source: str | None = None
+    # Founder-extraction caching (founder_pipeline.py) — see db.py's schema
+    # comment for the full rationale. Set whenever extract_founder_status()
+    # is actually called; carried forward unchanged on a cache-hit run.
+    founder_extraction_fingerprint: str | None = None
+    founder_transition_date: str | None = None
 
 
 @dataclass
@@ -109,6 +114,10 @@ class Designation:
     summary_confidence_flag: str | None = None
     summary_generated_at: str | None = None
     date_granted_source: str | None = None  # see RawDesignation
+    # Summary caching (pipeline.py) — see db.py's schema comment for the
+    # full rationale. Set whenever summarize_designation() is actually
+    # called; carried forward unchanged on a cache-hit run.
+    summary_input_fingerprint: str | None = None
 
 
 @dataclass

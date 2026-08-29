@@ -38,6 +38,24 @@ CREATE TABLE IF NOT EXISTS companies (
     network_effect_strength TEXT,
     founder_tier_source TEXT,
     founder_tier_as_of_date TEXT,
+    -- Hash of every input extract_founder_status() actually sees (company
+    -- name + the filing/board-page excerpt) at the time the current
+    -- founder_tier/network_effect were derived. founder_pipeline.py
+    -- compares this against a freshly-fetched excerpt's fingerprint on
+    -- every run and only calls Claude again if they differ — same
+    -- daily-schedule cost reasoning as designations.summary_input_fingerprint.
+    founder_extraction_fingerprint TEXT,
+    -- The *effective* transition date (Claude's raw transition_date, or
+    -- Korea's DART-anchored one when earlier — see founder_pipeline.py's
+    -- _effective_transition_date()) behind the current founder_tier's
+    -- recency evaluation. Persisted so _apply_recency_rule() can be
+    -- re-run fresh every day — a Founder-Chair can still age past the
+    -- 24-month window and need downgrading to Founder-departed purely
+    -- from elapsed time, even on a day the underlying excerpt (and so
+    -- founder_extraction_fingerprint) hasn't changed at all, so this
+    -- specific check must never be skipped just because the Claude call
+    -- was.
+    founder_transition_date TEXT,
     -- Brief section 4's "listing status changed" case — see models.py's
     -- Company.delisted_or_acquired.
     delisted_or_acquired INTEGER NOT NULL DEFAULT 0,
@@ -111,7 +129,16 @@ CREATE TABLE IF NOT EXISTS designations (
     -- not just data_source's "manual_seed:<file>" — see models.py.
     date_granted_source TEXT,
     -- See companies.first_seen_at above — same semantics.
-    first_seen_at TEXT
+    first_seen_at TEXT,
+    -- Hash of every input summarize_designation() actually sees (drug
+    -- name, resolved company name, ticker, designation type, date
+    -- granted, indication, trial phase, trial status) at the time the
+    -- current summary_text was generated. pipeline.py compares this
+    -- against a freshly-computed fingerprint on every run and only calls
+    -- Claude again if they differ — going from a weekly to a daily
+    -- schedule means the summary would otherwise get regenerated (and
+    -- billed) 7x more often for facts that didn't actually change.
+    summary_input_fingerprint TEXT
 );
 
 -- Singleton (id is always 1, enforced below) — the timestamp of the most
@@ -264,6 +291,9 @@ _MIGRATIONS = [
     ("companies", "sp500_current_price", "REAL"),
     ("companies", "backtest_as_of_date", "TEXT"),
     ("companies", "backtest_source", "TEXT"),
+    ("designations", "summary_input_fingerprint", "TEXT"),
+    ("companies", "founder_extraction_fingerprint", "TEXT"),
+    ("companies", "founder_transition_date", "TEXT"),
 ]
 
 
@@ -320,10 +350,11 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             trailing_pe, forward_pe, fifty_two_week_low, fifty_two_week_high, beta,
             dividend_yield_pct, valuation_as_of_date, valuation_source,
             ipo_date, ipo_price, backtest_current_price, sp500_price_at_ipo,
-            sp500_current_price, backtest_as_of_date, backtest_source
+            sp500_current_price, backtest_as_of_date, backtest_source,
+            founder_extraction_fingerprint, founder_transition_date
         ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
         ON CONFLICT(ticker) DO UPDATE SET
             company_name=excluded.company_name,
@@ -359,7 +390,9 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             sp500_price_at_ipo=excluded.sp500_price_at_ipo,
             sp500_current_price=excluded.sp500_current_price,
             backtest_as_of_date=excluded.backtest_as_of_date,
-            backtest_source=excluded.backtest_source
+            backtest_source=excluded.backtest_source,
+            founder_extraction_fingerprint=excluded.founder_extraction_fingerprint,
+            founder_transition_date=excluded.founder_transition_date
         """,
         (
             company.ticker,
@@ -398,8 +431,18 @@ def upsert_company(conn: sqlite3.Connection, company: Company):
             company.sp500_current_price,
             company.backtest_as_of_date,
             company.backtest_source,
+            company.founder_extraction_fingerprint,
+            company.founder_transition_date,
         ),
     )
+
+
+def get_company(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
+    """The row as it stood *before* this run's upsert_company() call —
+    founder_pipeline.py fetches this first thing in each candidate's
+    success path to compare against a freshly-computed
+    founder_extraction_fingerprint, before anything overwrites it."""
+    return conn.execute("SELECT * FROM companies WHERE ticker = ?", (ticker,)).fetchone()
 
 
 def insert_ownership(conn: sqlite3.Connection, ownership: Ownership):
@@ -428,8 +471,8 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             designation_id, ticker, source, type, date_granted, drug_name,
             indication, trial_id, data_source, data_as_of_date, raw_company_name,
             summary_text, summary_confidence_flag, summary_generated_at,
-            date_granted_source, first_seen_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            date_granted_source, first_seen_at, summary_input_fingerprint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(designation_id) DO UPDATE SET
             ticker=excluded.ticker,
             source=excluded.source,
@@ -444,7 +487,8 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             summary_text=excluded.summary_text,
             summary_confidence_flag=excluded.summary_confidence_flag,
             summary_generated_at=excluded.summary_generated_at,
-            date_granted_source=excluded.date_granted_source
+            date_granted_source=excluded.date_granted_source,
+            summary_input_fingerprint=excluded.summary_input_fingerprint
         """,
         (
             designation.designation_id,
@@ -463,8 +507,18 @@ def upsert_designation(conn: sqlite3.Connection, designation: Designation):
             designation.summary_generated_at,
             designation.date_granted_source,
             now_iso(),
+            designation.summary_input_fingerprint,
         ),
     )
+
+
+def get_designation(conn: sqlite3.Connection, designation_id: str) -> sqlite3.Row | None:
+    """The row as it stood before this run's upsert_designation() call —
+    pipeline.py fetches this first thing to compare against a freshly-
+    computed summary_input_fingerprint, before anything overwrites it."""
+    return conn.execute(
+        "SELECT * FROM designations WHERE designation_id = ?", (designation_id,)
+    ).fetchone()
 
 
 def upsert_trial(conn: sqlite3.Connection, trial: Trial):
