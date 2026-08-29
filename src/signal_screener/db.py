@@ -141,7 +141,9 @@ CREATE TABLE IF NOT EXISTS user_notes (
 -- everything" guardrail (section 6) requires: ticker (entry_id alone
 -- doesn't carry one), price_source, and a real as-of date per checkpoint —
 -- price_at_3mo means little without knowing exactly when it was captured,
--- which won't be exactly 3 months to the day on a weekly check schedule.
+-- which won't necessarily be exactly 3 months to the day even on a daily
+-- check schedule (a due date landing on a weekend/market holiday still
+-- gets picked up on the next trading day's check, not backdated).
 -- entry_id is UNIQUE: one row per entry, created once at first qualifying
 -- flag (see track_record.py) and never overwritten, even if the flag
 -- itself changes on a later run — see that module's docstring.
@@ -282,9 +284,10 @@ def dump_sql(path: Path) -> None:
     """Writes the db as a plain-text SQL script (sqlite3's .dump, via the
     stdlib's iterdump() — no sqlite3 CLI tool required). This, not the
     binary db file, is what's committed to git: git-diffable and mergeable,
-    where a binary sqlite file is neither. Used by the weekly GitHub Actions
-    workflow to persist state (in particular the ownership table's history)
-    across otherwise-ephemeral CI runs — see restore_sql()."""
+    where a binary sqlite file is neither. Used by the daily GitHub Actions
+    workflow (.github/workflows/daily.yml) to persist state (in particular
+    the ownership table's history) across otherwise-ephemeral CI runs —
+    see restore_sql()."""
     init_db()
     with connect() as conn:
         path.write_text("\n".join(conn.iterdump()) + "\n", encoding="utf-8")

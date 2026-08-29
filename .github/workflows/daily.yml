@@ -1,10 +1,18 @@
-name: Weekly pipeline
+name: Daily pipeline
 
 on:
-  # Mondays 13:00 UTC. Cron is always UTC regardless of runner locale —
-  # adjust here if you want the digest to land at a different local time.
+  # Every day, 13:00 UTC. Cron is always UTC regardless of runner locale —
+  # adjust here if you want the run to land at a different local time.
+  #
+  # Data/site refresh runs daily; the email digest itself still only
+  # sends on Mondays (see the "Send digest" step below) — brief section
+  # 8's "weekly digest, not real-time alerts" reasoning is specifically
+  # about inbox noise from frequent emails, not about how often the
+  # underlying facts (price, ownership, delisting status) get re-checked
+  # or the site gets rebuilt. Keeping the site always current while the
+  # digest stays weekly satisfies both.
   schedule:
-    - cron: "0 13 * * 1"
+    - cron: "0 13 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -59,8 +67,20 @@ jobs:
       - name: Check due track-record outcomes (3/6/12mo)
         run: signal-screener check-outcomes -v
 
-      - name: Send weekly digest
-        run: signal-screener digest -v
+      - name: Send digest (Mondays only)
+        # The pipeline/site refresh above runs daily, but the email send
+        # stays weekly — see the schedule comment above. date -u +%u gives
+        # ISO day-of-week (1=Monday..7=Sunday), matching the cron's old
+        # "* * 1" day-of-week field this replaced. Also skipped on a
+        # manual workflow_dispatch run on a non-Monday, so triggering this
+        # by hand to refresh data doesn't unexpectedly email out; run
+        # `signal-screener digest -v` locally for an on-demand send.
+        run: |
+          if [ "$(date -u +%u)" = "1" ]; then
+            signal-screener digest -v
+          else
+            echo "Not Monday — skipping digest send (data/site still refreshed daily above)."
+          fi
 
       - name: Generate static site
         run: signal-screener generate-site -v
@@ -73,5 +93,5 @@ jobs:
           git config user.name "signal-screener-bot"
           git config user.email "actions@users.noreply.github.com"
           git add docs/index.html data/signal_screener.sql
-          git diff --cached --quiet || git commit -m "Weekly site + db refresh $(date -u +%Y-%m-%d)"
+          git diff --cached --quiet || git commit -m "Daily site + db refresh $(date -u +%Y-%m-%d)"
           git push
