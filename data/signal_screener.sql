@@ -153,7 +153,6 @@ INSERT INTO "ownership" VALUES(74,'ZAL.DE','Robert Gentz','Robert Gentz is Co-fo
 INSERT INTO "ownership" VALUES(75,'035420.KS','Lee Hae-jin','Chairman of the Board (이사회 의장)',NULL,'KR:DART exctvSttus corp_code=00266961','2026-08-29');
 INSERT INTO "ownership" VALUES(76,'0700.HK','Ma Huateng (Pony Ma)','Chairman and Chief Executive Officer',NULL,'HK:https://www.tencent.com/en-us/investors/board-members.html','2026-08-29');
 INSERT INTO "ownership" VALUES(77,'ADYEN.AS','Pieter van der Does','Co-Chief Executive Officer',2.98,'NL:https://investors.adyen.com/governance','2026-08-29');
-INSERT INTO "ownership" VALUES(78,'0700.HK','Ma Huateng (Pony Ma)','Non-executive Chairman (stepped back from CEO in August 2026)',NULL,'HK:https://www.tencent.com/en-us/investors/board-members.html','2026-08-29');
 INSERT INTO "ownership" VALUES(79,'0700.HK','Ma Huateng (Pony Ma)','Chairman and Chief Executive Officer',NULL,'HK:https://www.tencent.com/en-us/investors/board-members.html','2026-08-29');
 CREATE TABLE site_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
