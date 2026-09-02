@@ -220,6 +220,7 @@ These aren't nice-to-haves — they're the difference between a tool that gets c
 - **Personal notes field per entry (`user_notes` table)** — a place for your own read on each company/drug, especially on the biotech side where your clinical judgment is the actual differentiator. Your own past notes will be more valuable to future-you than anything the AI generates.
 - **Weekly digest, not real-time alerts** — real-time feels powerful but mostly just creates noise and encourages reacting to short-term movement instead of signal.
 - **Source + as-of date on everything** — already specified above; non-negotiable.
+- **Founder-departed entries split into a secondary "No longer founder-led" group, not blended in and not archived.** The main "Founder-led companies" section's primary list position is reserved for Founder-CEO and Founder-Chair only — the two tiers the automatic track-record checker (this section, above) actually triggers on, because they're the ones that still match this screener's founder-led + network-effect thesis. Founder-departed companies (the founder left, but the company is still a live, tradable listing) render underneath, in their own labeled group within the same section. They deliberately don't go in the delisted/acquired Archive — that section means "no longer tradable," which isn't true here.
 
 ## 9. Deliberately excluded — not just "later," actually out of scope
 

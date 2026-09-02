@@ -596,11 +596,35 @@ def build_site_html() -> str:
         else '<p class="sub">Nothing archived yet — this fills in as designations '
         "get confirmed delisted/acquired.</p>"
     )
+    # Founder-departed entries (currently founder is out but the company is
+    # still a live, tradable listing) render in a secondary "No longer
+    # founder-led" group within this same section, not the delisted/acquired
+    # Archive (that section means "no longer tradable," which isn't true
+    # here) and not blended into the primary list either. Founder-CEO and
+    # Founder-Chair keep the primary main-list position — those are the two
+    # tiers track_record.py's trigger logic actually tracks as matching this
+    # screener's live founder-led + network-effect thesis; Founder-departed
+    # triggers nothing there.
+    primary_founder_cards = [
+        (row, card_html) for row, card_html in founder_cards if row["founder_tier"] != "Founder-departed"
+    ]
+    departed_founder_cards = [
+        (row, card_html) for row, card_html in founder_cards if row["founder_tier"] == "Founder-departed"
+    ]
     founder_html = (
-        "".join(card_html for _, card_html in founder_cards)
-        if founder_cards
+        "".join(card_html for _, card_html in primary_founder_cards)
+        if primary_founder_cards
         else '<p class="sub">No founder-led companies on file yet.</p>'
     )
+    if departed_founder_cards:
+        founder_html += (
+            '<h3 class="subsection-title">No longer founder-led</h3>'
+            '<p class="sub">The founder has since left, so these no longer match this '
+            "screener's founder-led thesis — but the company is still a live, tradable "
+            "listing, which is why these sit here rather than in the delisted/acquired "
+            "Archive below.</p>"
+            f"{''.join(card_html for _, card_html in departed_founder_cards)}"
+        )
 
     new_biotech_html = "".join(
         card_html for row, card_html in biotech_cards if _is_new(row, previous_generated_at)

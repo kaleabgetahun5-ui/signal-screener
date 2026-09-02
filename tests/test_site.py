@@ -135,6 +135,57 @@ def test_delisted_biotech_entries_render_in_archive_not_main_section(tmp_path, m
     assert "Active Drug" not in archive_only
 
 
+def test_founder_departed_renders_in_no_longer_founder_led_subsection(tmp_path, monkeypatch):
+    """A Founder-departed company renders in a secondary "No longer
+    founder-led" group within the main "Founder-led companies" section —
+    not blended into the primary Founder-CEO/Founder-Chair list (the two
+    tiers track_record.py actually triggers on), and not moved to the
+    delisted/acquired Archive, since that section means "no longer
+    tradable," which isn't true for a Founder-departed company."""
+    site = _reload(tmp_path, monkeypatch, "site")
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="CEO1",
+                company_name="Still Founder Led Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="DEP1",
+                company_name="Founder Departed Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-departed",
+            ),
+        )
+
+    html_out = site.build_site_html()
+
+    archive_and_earlier, _, founder_section = html_out.partition("Founder-led companies</h2>")
+    primary_group, has_subsection, departed_group = founder_section.partition(
+        "No longer founder-led"
+    )
+
+    assert has_subsection  # the labeled subsection heading is present at all
+    assert "Still Founder Led Co" in primary_group
+    assert "Founder Departed Co" not in primary_group
+    assert "Founder Departed Co" in departed_group
+    assert "Still Founder Led Co" not in departed_group
+    # Not diverted into the delisted/acquired Archive, which renders
+    # entirely before "Founder-led companies</h2>".
+    assert "Founder Departed Co" not in archive_and_earlier
+
+
 def test_notes_render_on_biotech_card(tmp_path, monkeypatch):
     site = _reload(tmp_path, monkeypatch, "site")
     db = importlib.import_module("signal_screener.db")
