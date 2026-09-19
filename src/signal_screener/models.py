@@ -121,6 +121,31 @@ class Designation:
 
 
 @dataclass
+class FounderCandidate:
+    """A company found by the S&P 500 discovery pipeline
+    (founder_discovery_pipeline.py) where a filing excerpt explicitly
+    identifies someone as a founder in an active CEO/Chair role — pending
+    human review before it's ever promoted into the real `companies` table.
+    Never rendered on the live site; see db.py's founder_candidates table
+    comment for the approval workflow this backs."""
+
+    ticker: str
+    company_name: str
+    founder_name: str
+    current_title: str
+    ownership_pct: float | None
+    ownership_stake_text: str
+    source_citation: str  # e.g. "DEF 14A:https://www.sec.gov/..."
+    source_excerpt: str  # what Claude actually saw — kept for auditability
+    discovered_at: str
+    country: str | None = None
+    exchange: str | None = None
+    sector: str | None = None
+    status: str = "pending"  # "pending" | "approved" | "rejected" | "promoted"
+    reviewed_at: str | None = None
+
+
+@dataclass
 class Trial:
     trial_id: str
     registry: str

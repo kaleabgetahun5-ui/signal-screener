@@ -5,7 +5,7 @@ from pathlib import Path
 
 from signal_screener import db
 from signal_screener import digest as digest_module
-from signal_screener import founder_pipeline, pipeline, site, track_record
+from signal_screener import founder_discovery_pipeline, founder_pipeline, pipeline, site, track_record
 from signal_screener.matching.ticker_verify import resolve_arbitrary_ticker
 
 DEFAULT_DB_DUMP_PATH = "data/signal_screener.sql"
@@ -114,6 +114,56 @@ def main():
         "(roadmap step 6 — run this on the same schedule as the rest of the pipeline)",
     )
     check_outcomes_parser.add_argument("-v", "--verbose", action="store_true")
+
+    discover_parser = subparsers.add_parser(
+        "discover-sp500",
+        help="Scan the S&P 500 for founder-led companies beyond the existing Tier 1/2 "
+        "list. Never touches the live `companies` table — every match is written to "
+        "founder_candidates as 'pending' for review (candidates-list/-approve/-reject).",
+    )
+    discover_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only scan this many not-yet-known tickers (omit to scan the full ~500-"
+        "ticker list — expect a long run and real API usage)",
+    )
+    discover_parser.add_argument("-v", "--verbose", action="store_true")
+
+    candidates_list_parser = subparsers.add_parser(
+        "candidates-list",
+        help="Print the discovery review list — company, ticker, founder claim, "
+        "title, ownership %%, and source, for real human sign-off",
+    )
+    candidates_list_parser.add_argument(
+        "--status",
+        default="pending",
+        choices=["pending", "approved", "rejected", "promoted", "all"],
+        help="Which candidates to show (default: pending)",
+    )
+    candidates_list_parser.add_argument("-v", "--verbose", action="store_true")
+
+    candidates_approve_parser = subparsers.add_parser(
+        "candidates-approve",
+        help="Approve a pending discovery candidate — required before "
+        "candidates-promote will ever add it to the live companies table",
+    )
+    candidates_approve_parser.add_argument("ticker")
+    candidates_approve_parser.add_argument("-v", "--verbose", action="store_true")
+
+    candidates_reject_parser = subparsers.add_parser(
+        "candidates-reject", help="Reject a pending discovery candidate"
+    )
+    candidates_reject_parser.add_argument("ticker")
+    candidates_reject_parser.add_argument("-v", "--verbose", action="store_true")
+
+    candidates_promote_parser = subparsers.add_parser(
+        "candidates-promote",
+        help="Add every approved discovery candidate to the live companies table, "
+        "through the same verify/classify/store pipeline Tier 1/2 use. Only acts on "
+        "candidates already marked 'approved' via candidates-approve.",
+    )
+    candidates_promote_parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()
 
@@ -245,6 +295,53 @@ def main():
         total = sum(filled.values())
         breakdown = ", ".join(f"{n} at {cp}" for cp, n in filled.items())
         print(f"{total} checkpoint(s) recorded: {breakdown}")
+    elif args.command == "discover-sp500":
+        summary = founder_discovery_pipeline.run(limit=args.limit)
+        print(summary.one_line())
+        if summary.newly_discovered:
+            print("\nNew candidate(s) — review with `signal-screener candidates-list`:")
+            print(", ".join(summary.newly_discovered))
+    elif args.command == "candidates-list":
+        db.init_db()
+        with db.connect() as conn:
+            status = None if args.status == "all" else args.status
+            rows = db.list_founder_candidates(conn, status=status)
+        if not rows:
+            label = "any status" if args.status == "all" else f"status={args.status!r}"
+            print(f"No candidates with {label}.")
+        else:
+            for row in rows:
+                ownership = (
+                    f"{row['ownership_pct']:.1f}%" if row["ownership_pct"] is not None else "not disclosed"
+                )
+                print(
+                    f"{row['ticker']} — {row['company_name']} [{row['status']}]\n"
+                    f"  Founder claim: {row['founder_name']}, {row['current_title']}\n"
+                    f"  Ownership: {ownership} ({row['ownership_stake_text']})\n"
+                    f"  Source: {row['source_citation']}\n"
+                    f"  Discovered: {row['discovered_at']}\n"
+                )
+    elif args.command == "candidates-approve":
+        db.init_db()
+        with db.connect() as conn:
+            found = db.get_founder_candidate(conn, args.ticker)
+            if found is None:
+                print(f"{args.ticker!r} isn't a known discovery candidate.")
+            else:
+                db.set_founder_candidate_status(conn, args.ticker, "approved", date.today().isoformat())
+                print(f"Approved {args.ticker}. Run `signal-screener candidates-promote` to add it live.")
+    elif args.command == "candidates-reject":
+        db.init_db()
+        with db.connect() as conn:
+            found = db.get_founder_candidate(conn, args.ticker)
+            if found is None:
+                print(f"{args.ticker!r} isn't a known discovery candidate.")
+            else:
+                db.set_founder_candidate_status(conn, args.ticker, "rejected", date.today().isoformat())
+                print(f"Rejected {args.ticker}.")
+    elif args.command == "candidates-promote":
+        summary = founder_discovery_pipeline.promote_approved()
+        print(summary.one_line())
 
 
 if __name__ == "__main__":

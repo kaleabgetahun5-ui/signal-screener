@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from signal_screener.config import DB_PATH
-from signal_screener.models import Company, Designation, Ownership, Trial
+from signal_screener.models import Company, Designation, FounderCandidate, Ownership, Trial
 
 
 def now_iso() -> str:
@@ -229,6 +229,38 @@ CREATE TABLE IF NOT EXISTS watchlist (
     verification_source TEXT,
     verification_date TEXT,
     verification_reason TEXT
+);
+
+-- S&P 500 discovery feature's approval gate: a row here means the
+-- discovery pipeline found a filing that explicitly names someone as a
+-- founder in an active CEO/Chair role (summarize/founder_discovery_extraction.py),
+-- NOT that it's been added to the real `companies` table — nothing in
+-- this table is ever rendered on the live site or in the digest. ticker is
+-- the primary key (one candidacy per company; re-running discovery is
+-- INSERT OR IGNORE, so it never clobbers a status a human already set).
+-- status is the whole approval mechanism: 'pending' (awaiting review),
+-- 'approved'/'rejected' (a human decision via the candidates-approve/
+-- candidates-reject CLI commands), 'promoted' (an approved row that
+-- founder_discovery_pipeline.promote_approved() has since turned into a
+-- real companies row, through the same match/verify/classify/store path
+-- Tier 1/2 already use — see that function's docstring). Nothing
+-- transitions a row's status except an explicit CLI command; discovery
+-- itself never overwrites an existing row's status.
+CREATE TABLE IF NOT EXISTS founder_candidates (
+    ticker TEXT PRIMARY KEY,
+    company_name TEXT NOT NULL,
+    founder_name TEXT NOT NULL,
+    current_title TEXT NOT NULL,
+    ownership_pct REAL,
+    ownership_stake_text TEXT,
+    source_citation TEXT NOT NULL,
+    source_excerpt TEXT NOT NULL,
+    discovered_at TEXT NOT NULL,
+    country TEXT,
+    exchange TEXT,
+    sector TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS trials (
@@ -759,3 +791,88 @@ def record_outcome_checkpoint(
         """,
         (price, price_date, outcome_id),
     )
+
+
+_VALID_CANDIDATE_STATUSES = ("pending", "approved", "rejected", "promoted")
+
+
+def insert_founder_candidate(conn: sqlite3.Connection, candidate: FounderCandidate) -> bool:
+    """INSERT OR IGNORE, not upsert: ticker is the primary key, and a
+    re-run of discovery must never clobber a status a human already set on
+    an existing candidacy (pending/approved/rejected/promoted) — see the
+    founder_candidates schema comment. Returns True iff a new row was
+    actually inserted, so the discovery pipeline can report how many are
+    genuinely new since the last run vs. already known."""
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO founder_candidates (
+            ticker, company_name, founder_name, current_title, ownership_pct,
+            ownership_stake_text, source_citation, source_excerpt, discovered_at,
+            country, exchange, sector, status, reviewed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            candidate.ticker,
+            candidate.company_name,
+            candidate.founder_name,
+            candidate.current_title,
+            candidate.ownership_pct,
+            candidate.ownership_stake_text,
+            candidate.source_citation,
+            candidate.source_excerpt,
+            candidate.discovered_at,
+            candidate.country,
+            candidate.exchange,
+            candidate.sector,
+            candidate.status,
+            candidate.reviewed_at,
+        ),
+    )
+    return cur.rowcount > 0
+
+
+def get_founder_candidate(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM founder_candidates WHERE ticker = ?", (ticker,)
+    ).fetchone()
+
+
+def list_founder_candidates(conn: sqlite3.Connection, status: str | None = None) -> list[sqlite3.Row]:
+    """All candidates, or just those in one status (typically 'pending', for
+    the review list) — ordered oldest-discovered-first so a batch reviews in
+    the order it was found."""
+    if status is None:
+        return conn.execute(
+            "SELECT * FROM founder_candidates ORDER BY discovered_at, ticker"
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM founder_candidates WHERE status = ? ORDER BY discovered_at, ticker",
+        (status,),
+    ).fetchall()
+
+
+def get_known_discovery_tickers(conn: sqlite3.Connection) -> set[str]:
+    """Every ticker discovery must skip on a re-run: already a real
+    screened company (any tier, any source) or already has a
+    founder_candidates row in any status. Keeps a re-run incremental
+    (only scans S&P 500 tickers genuinely new to both tables) and, just as
+    importantly, keeps discovery from ever touching a ticker that's
+    already one of the hand-curated Tier 1/Tier 2 companies."""
+    company_tickers = {row["ticker"] for row in conn.execute("SELECT ticker FROM companies")}
+    candidate_tickers = {row["ticker"] for row in conn.execute("SELECT ticker FROM founder_candidates")}
+    return company_tickers | candidate_tickers
+
+
+def set_founder_candidate_status(
+    conn: sqlite3.Connection, ticker: str, status: str, reviewed_at: str
+) -> bool:
+    """Returns True iff a row for this ticker actually existed to update —
+    the CLI uses this to tell a real approve/reject apart from a typo'd
+    ticker."""
+    if status not in _VALID_CANDIDATE_STATUSES:
+        raise ValueError(f"status must be one of {_VALID_CANDIDATE_STATUSES}, got {status!r}")
+    cur = conn.execute(
+        "UPDATE founder_candidates SET status = ?, reviewed_at = ? WHERE ticker = ?",
+        (status, reviewed_at, ticker),
+    )
+    return cur.rowcount > 0

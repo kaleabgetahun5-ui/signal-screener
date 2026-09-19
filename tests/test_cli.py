@@ -150,3 +150,132 @@ def test_watchlist_add_accepts_verified_arbitrary_ticker(tmp_path, monkeypatch, 
         assert rows[0]["entry_kind"] == "arbitrary"
         assert rows[0]["company_name"] == "Apple Inc."
         assert db.get_watchlist_entry_ids(conn) == set()  # pipeline-only set
+
+
+def _insert_fake_candidate(db, conn, ticker="DISC", status="pending"):
+    from signal_screener.models import FounderCandidate
+
+    db.insert_founder_candidate(
+        conn,
+        FounderCandidate(
+            ticker=ticker,
+            company_name="Discovered Co",
+            founder_name="Jane Founder",
+            current_title="Chief Executive Officer",
+            ownership_pct=12.5,
+            ownership_stake_text="12.5%",
+            source_citation="DEF 14A:https://www.sec.gov/fake.htm",
+            source_excerpt="Jane Founder is our founder and CEO, owning 12.5%.",
+            discovered_at="2026-09-15",
+            country="Nowhere, USA",
+            exchange="NASDAQ",
+            sector="Technology",
+            status=status,
+        ),
+    )
+
+
+def test_candidates_list_shows_pending_by_default(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
+
+    db.init_db()
+    with db.connect() as conn:
+        _insert_fake_candidate(db, conn, ticker="DISC")
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-list"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "DISC" in out
+    assert "Discovered Co" in out
+    assert "Jane Founder" in out
+    assert "Chief Executive Officer" in out
+    assert "12.5%" in out
+    assert "DEF 14A:https://www.sec.gov/fake.htm" in out
+
+
+def test_candidates_list_empty_state(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
+    db.init_db()
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-list"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "No candidates" in out
+
+
+def test_candidates_approve_and_reject_roundtrip(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
+
+    db.init_db()
+    with db.connect() as conn:
+        _insert_fake_candidate(db, conn, ticker="APPR")
+        _insert_fake_candidate(db, conn, ticker="REJ")
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-approve", "APPR"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Approved APPR" in out
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-reject", "REJ"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Rejected REJ" in out
+
+    with db.connect() as conn:
+        assert db.get_founder_candidate(conn, "APPR")["status"] == "approved"
+        assert db.get_founder_candidate(conn, "REJ")["status"] == "rejected"
+
+
+def test_candidates_approve_unknown_ticker_reports_not_found(tmp_path, monkeypatch, capsys):
+    cli = _reload_cli(tmp_path, monkeypatch)
+    db = importlib.import_module("signal_screener.db")
+    db.init_db()
+
+    monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-approve", "NOPE"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "isn't a known discovery candidate" in out
+
+
+def test_discover_sp500_command_invokes_pipeline_and_prints_summary(tmp_path, monkeypatch, capsys):
+    from unittest.mock import patch
+
+    cli = _reload_cli(tmp_path, monkeypatch)
+
+    class _FakeSummary:
+        newly_discovered = ["NEWCO"]
+
+        def one_line(self):
+            return "3 scanned, 1 new candidate(s) found"
+
+    with patch.object(cli.founder_discovery_pipeline, "run", return_value=_FakeSummary()) as mock_run:
+        monkeypatch.setattr("sys.argv", ["signal-screener", "discover-sp500", "--limit", "5"])
+        cli.main()
+
+    mock_run.assert_called_once_with(limit=5)
+    out = capsys.readouterr().out
+    assert "3 scanned, 1 new candidate(s) found" in out
+    assert "NEWCO" in out
+
+
+def test_candidates_promote_command_invokes_pipeline_and_prints_summary(tmp_path, monkeypatch, capsys):
+    from unittest.mock import patch
+
+    cli = _reload_cli(tmp_path, monkeypatch)
+
+    class _FakeSummary:
+        def one_line(self):
+            return "1 promoted (APPR), 0 lookup failure(s), 0 extraction failure(s)"
+
+    with patch.object(
+        cli.founder_discovery_pipeline, "promote_approved", return_value=_FakeSummary()
+    ) as mock_promote:
+        monkeypatch.setattr("sys.argv", ["signal-screener", "candidates-promote"])
+        cli.main()
+
+    mock_promote.assert_called_once_with()
+    out = capsys.readouterr().out
+    assert "1 promoted (APPR)" in out

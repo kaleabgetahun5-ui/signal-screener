@@ -162,3 +162,46 @@ def extract_leadership_excerpt(text: str, founder_name: str, max_chars: int = 60
 
     combined = "\n...\n".join(sections) if sections else text[:max_chars]
     return combined[:max_chars]
+
+
+# S&P 500 discovery (founder_discovery_pipeline.py): unlike
+# extract_leadership_excerpt above, discovery doesn't know a founder's name
+# ahead of time — finding out who (if anyone) is named as a founder is the
+# whole point. So this searches for the word itself rather than a surname,
+# and is deliberately a cheap, cite-nothing prefilter: a company whose
+# filing never says "founder" anywhere gets skipped before ever reaching a
+# Claude call, not because it's assumed to be un-founder-led, but because
+# there's nothing here for summarize/founder_discovery_extraction.py's
+# "only answer from what's stated" prompt to work from either way.
+_FOUNDER_MENTION_RE = re.compile(r"\b(?:co-?)?founders?\b", re.IGNORECASE)
+
+# How many of the found mentions to actually include (best-effort, ranked
+# by nothing but position — first mentions in a proxy/annual report are
+# most often the CEO letter or leadership bio, later ones increasingly
+# likely to be boilerplate like "the Company was founded in Delaware").
+MAX_FOUNDER_MENTIONS = 4
+
+
+def extract_founder_mention_excerpts(text: str, max_chars: int = 6000) -> str | None:
+    """Returns a combined excerpt around every "founder"/"co-founder"
+    mention in text (deduplicated by proximity), or None if the word never
+    appears at all — see the guard above for why None is a real, useful
+    signal here rather than an edge case to work around."""
+    matches = list(_FOUNDER_MENTION_RE.finditer(text))
+    if not matches:
+        return None
+
+    sections = []
+    last_end = -1
+    for m in matches:
+        if m.start() < last_end:
+            continue  # already covered by the previous window
+        start = max(0, m.start() - 400)
+        end = min(len(text), m.end() + 900)
+        sections.append(text[start:end])
+        last_end = end
+        if len(sections) >= MAX_FOUNDER_MENTIONS:
+            break
+
+    combined = "\n...\n".join(sections)
+    return combined[:max_chars]

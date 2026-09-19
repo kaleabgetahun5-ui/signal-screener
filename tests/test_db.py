@@ -258,3 +258,112 @@ def test_watchlist_arbitrary_entries_stored_and_scoped_separately(tmp_path, monk
         all_rows = db.list_watchlist(conn)
         kinds = {r["entry_id"]: r["entry_kind"] for r in all_rows}
         assert kinds == {"TEST": "pipeline", "AAPL": "arbitrary"}
+
+
+def _fake_candidate(ticker="DISC", **overrides):
+    from signal_screener.models import FounderCandidate
+
+    fields = dict(
+        ticker=ticker,
+        company_name="Discovered Co",
+        founder_name="Jane Founder",
+        current_title="Chief Executive Officer",
+        ownership_pct=12.5,
+        ownership_stake_text="12.5%",
+        source_citation="DEF 14A:https://www.sec.gov/fake-filing.htm",
+        source_excerpt="Jane Founder is our founder and Chief Executive Officer, owning 12.5%.",
+        discovered_at="2026-09-15",
+        country="Nowhere, USA",
+        exchange="NASDAQ",
+        sector="Technology",
+    )
+    fields.update(overrides)
+    return FounderCandidate(**fields)
+
+
+def test_insert_founder_candidate_and_get(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+
+    with db.connect() as conn:
+        inserted = db.insert_founder_candidate(conn, _fake_candidate())
+        assert inserted is True
+
+        row = db.get_founder_candidate(conn, "DISC")
+        assert row["company_name"] == "Discovered Co"
+        assert row["founder_name"] == "Jane Founder"
+        assert row["status"] == "pending"
+
+
+def test_insert_founder_candidate_never_clobbers_existing_status(tmp_path, monkeypatch):
+    """A re-run of discovery must not silently reset a human's approve/
+    reject decision back to 'pending' — INSERT OR IGNORE, not upsert."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+
+    with db.connect() as conn:
+        db.insert_founder_candidate(conn, _fake_candidate())
+        db.set_founder_candidate_status(conn, "DISC", "approved", "2026-09-16")
+
+        # Discovery re-runs and finds the same ticker again.
+        inserted_again = db.insert_founder_candidate(conn, _fake_candidate())
+        assert inserted_again is False
+
+        row = db.get_founder_candidate(conn, "DISC")
+        assert row["status"] == "approved"
+
+
+def test_list_founder_candidates_filters_by_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+
+    with db.connect() as conn:
+        db.insert_founder_candidate(conn, _fake_candidate(ticker="ONE"))
+        db.insert_founder_candidate(conn, _fake_candidate(ticker="TWO"))
+        db.set_founder_candidate_status(conn, "TWO", "approved", "2026-09-16")
+
+        pending = db.list_founder_candidates(conn, status="pending")
+        approved = db.list_founder_candidates(conn, status="approved")
+        everything = db.list_founder_candidates(conn)
+
+        assert {r["ticker"] for r in pending} == {"ONE"}
+        assert {r["ticker"] for r in approved} == {"TWO"}
+        assert {r["ticker"] for r in everything} == {"ONE", "TWO"}
+
+
+def test_set_founder_candidate_status_returns_false_for_unknown_ticker(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+
+    with db.connect() as conn:
+        updated = db.set_founder_candidate_status(conn, "NOPE", "approved", "2026-09-16")
+        assert updated is False
+
+
+def test_set_founder_candidate_status_rejects_invalid_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+
+    with db.connect() as conn:
+        db.insert_founder_candidate(conn, _fake_candidate())
+        with pytest.raises(ValueError):
+            db.set_founder_candidate_status(conn, "DISC", "not_a_real_status", "2026-09-16")
+
+
+def test_get_known_discovery_tickers_combines_companies_and_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(conn, Company(ticker="EXISTING", company_name="Existing Co", ticker_verified=True))
+        db.insert_founder_candidate(conn, _fake_candidate(ticker="DISC"))
+
+        known = db.get_known_discovery_tickers(conn)
+        assert known == {"EXISTING", "DISC"}
