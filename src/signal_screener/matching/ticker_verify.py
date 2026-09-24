@@ -161,14 +161,32 @@ def _verify_via_yahoo(ticker: str, expected_company_name: str, checked_date: str
             reason=f"no listing found for symbol {ticker!r}",
         )
 
-    best = max(
+    # Sorted deterministically by (name score desc, symbol asc), not
+    # max()'s "first candidate with the top score in whatever order `quotes`
+    # happened to come back in" — a real bug found live against Zalando:
+    # Yahoo returns both its XETRA listing (ZAL.DE) and its Frankfurt floor
+    # listing (ZAL.F) for a "ZAL" search, both literally named "Zalando SE"
+    # and so tied on name score. Yahoo's unofficial search endpoint doesn't
+    # guarantee stable result ordering run to run (documented elsewhere in
+    # this module as unreliable), so max()'s tie-break silently flipped
+    # which one won on different days — and since `companies.ticker` is the
+    # primary key, a different resolved ticker for the same real company on
+    # a different day meant a second, duplicate company row instead of an
+    # update to the existing one. Sorting on the symbol string as an
+    # explicit secondary key makes the same underlying candidate set always
+    # resolve to the same ticker, regardless of API response ordering.
+    ranked = sorted(
         candidates,
-        key=lambda q: fuzz.token_set_ratio(
-            expected_company_name,
-            q.get("shortname") or q.get("longname") or "",
-            processor=utils.default_process,
+        key=lambda q: (
+            -fuzz.token_set_ratio(
+                expected_company_name,
+                q.get("shortname") or q.get("longname") or "",
+                processor=utils.default_process,
+            ),
+            q.get("symbol", ""),
         ),
     )
+    best = ranked[0]
     best_name_score = fuzz.token_set_ratio(
         expected_company_name,
         best.get("shortname") or best.get("longname") or "",

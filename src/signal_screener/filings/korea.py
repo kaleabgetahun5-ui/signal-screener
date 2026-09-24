@@ -41,6 +41,7 @@ disclosure-threshold gap.
 """
 
 import logging
+import time
 from datetime import date
 
 import requests
@@ -56,6 +57,22 @@ CORP_CODES = {
 EXCTV_STTUS_URL = "https://opendart.fss.or.kr/api/exctvSttus.json"
 MAJOR_STOCK_URL = "https://opendart.fss.or.kr/api/majorstock.json"
 
+# Same retry-with-backoff lesson already learned against Yahoo/SEC
+# elsewhere in this codebase (ticker_verify.py's own comment: "observed
+# returning no listing for real, unambiguous tickers on requests that
+# succeed moments later") — DART had none of this at all, so a single
+# transient blip on any of fetch_current_executives' several calls per
+# run permanently failed that day's attempt with no second try. Found
+# live: this is the direct cause of Naver being stuck at founder_tier
+# 'N/A' for weeks — _get_json raising propagates out of
+# fetch_current_executives/fetch_leadership_excerpt uncaught (no local
+# try/except there), founder_pipeline.py's _run_tier2 catches it at the
+# excerpt-fetch layer and writes an "unclassified" placeholder every
+# single day, with no retry ever giving that day's real DART data a
+# second chance.
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 1.0
+
 # Annual report only, no need to also try quarterly for this — a decade+
 # stale role only needs one confirmed old snapshot to establish "not
 # recent," not the most precise one available.
@@ -69,12 +86,25 @@ _REPRT_CODES = [("11013", "Q1"), ("11012", "H1"), ("11014", "Q3"), ("11011", "An
 
 
 def _get_json(url: str, params: dict) -> dict:
-    resp = requests.get(url, params={**params, "crtfc_key": OPENDART_API_KEY}, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("status") not in ("000", "013"):  # 013 = "no data found", not an error
-        raise RuntimeError(f"DART API error {data.get('status')}: {data.get('message')}")
-    return data
+    """Retries transient failures with exponential backoff before giving
+    up — both a network-level failure (requests.RequestException) and a
+    non-terminal DART API error status, the same "don't trust a single
+    failed attempt" lesson already applied to Yahoo/SEC elsewhere in this
+    codebase. Re-raises the last exception if every attempt fails."""
+    last_exc: Exception | None = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            resp = requests.get(url, params={**params, "crtfc_key": OPENDART_API_KEY}, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") not in ("000", "013"):  # 013 = "no data found", not an error
+                raise RuntimeError(f"DART API error {data.get('status')}: {data.get('message')}")
+            return data
+        except (requests.RequestException, RuntimeError) as exc:
+            last_exc = exc
+            if attempt < RETRY_ATTEMPTS - 1:
+                time.sleep(RETRY_BACKOFF_SECONDS * (2**attempt))
+    raise last_exc
 
 
 def _recent_report_periods() -> list[tuple[str, str]]:

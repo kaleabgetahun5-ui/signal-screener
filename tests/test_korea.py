@@ -37,6 +37,68 @@ def _require_key(monkeypatch):
     monkeypatch.setattr(korea, "OPENDART_API_KEY", "test-key")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    # Same "run the retry logic at full speed" reasoning as
+    # test_ticker_verify.py's identical fixture for Yahoo/SEC's retries.
+    monkeypatch.setattr(korea.time, "sleep", lambda seconds: None)
+
+
+def test_get_json_retries_on_request_exception_then_succeeds():
+    """Regression test for the real bug found live: Naver stuck at
+    founder_tier 'N/A' for weeks because a single transient DART failure
+    permanently failed that day's attempt with no retry at all — unlike
+    every other external call in this codebase (Yahoo, SEC, OpenFIGI all
+    retry transient failures)."""
+    calls = {"n": 0}
+
+    def get(url, params=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise korea.requests.ConnectionError("transient network blip")
+        return _exctv_response([{"nm": "이해진", "ofcps": "사내이사"}])
+
+    with patch.object(korea.requests, "get", side_effect=get):
+        data = korea._get_json(korea.EXCTV_STTUS_URL, {"corp_code": "00266961"})
+
+    assert calls["n"] == 3
+    assert data["list"] == [{"nm": "이해진", "ofcps": "사내이사"}]
+
+
+def test_get_json_retries_on_transient_api_error_status_then_succeeds():
+    calls = {"n": 0}
+
+    def get(url, params=None, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            return _FakeResponse({"status": "800", "message": "server busy"})
+        return _exctv_response([{"nm": "이해진"}])
+
+    with patch.object(korea.requests, "get", side_effect=get):
+        data = korea._get_json(korea.EXCTV_STTUS_URL, {"corp_code": "00266961"})
+
+    assert calls["n"] == 2
+    assert data["list"] == [{"nm": "이해진"}]
+
+
+def test_get_json_raises_after_exhausting_all_retries():
+    with patch.object(
+        korea.requests, "get", side_effect=korea.requests.ConnectionError("still down")
+    ) as mock_get:
+        with pytest.raises(korea.requests.ConnectionError):
+            korea._get_json(korea.EXCTV_STTUS_URL, {"corp_code": "00266961"})
+    assert mock_get.call_count == korea.RETRY_ATTEMPTS
+
+
+def test_get_json_no_data_status_is_not_retried_as_an_error():
+    """Status '013' ("no data found") is a legitimate, non-error DART
+    response — must return immediately, not burn through retries."""
+    with patch.object(korea.requests, "get", return_value=_empty_exctv_response()) as mock_get:
+        data = korea._get_json(korea.EXCTV_STTUS_URL, {"corp_code": "00266961"})
+    assert data["list"] == []
+    assert mock_get.call_count == 1
+
+
 def test_fetch_leadership_excerpt_marks_the_founder_row():
     executives = [
         {

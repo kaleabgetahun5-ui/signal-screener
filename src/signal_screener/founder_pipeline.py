@@ -26,7 +26,8 @@ Runs the founder-led subset of the project brief's pipeline (section 4):
 
 import hashlib
 import logging
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from signal_screener import backtest, db, track_record, valuation
@@ -113,6 +114,64 @@ def _apply_recency_rule(founder_tier: str, transition_date: str | None) -> tuple
             f"was {months:.0f} months ago, over the {FOUNDER_CHAIR_RECENCY_MONTHS}-month limit"
         )
     return founder_tier, None
+
+
+def _preserve_existing_classification(
+    existing: sqlite3.Row | None, failure_company: Company
+) -> Company:
+    """On a caught excerpt-fetch or extraction failure, don't let the
+    'N/A' placeholder built for that failure path overwrite a company's
+    last real classification. Found live against Naver: a caught failure
+    here previously wrote founder_tier='N/A' unconditionally, wiping
+    network_effect/founder_tier_source/the extraction fingerprint back to
+    None/N/A every single time it fired — turning what may have started
+    as a single bad day into weeks of an already-correctly-classified
+    company sitting on the live site looking unclassified, with nothing
+    to distinguish "never successfully classified" from "briefly failed
+    today." Only degrades to the N/A placeholder when there's genuinely
+    no prior classification to preserve (existing is None, or its
+    founder_tier is itself None/N/A already) — a company that's never
+    been successfully classified still needs to show up as such, not
+    silently vanish. The verification-related fields on failure_company
+    (ticker_verified, ticker_verification_*, ticker_match_confidence) are
+    always used as-is: those reflect today's real, successful ticker
+    verification, which did succeed even though the step after it
+    failed."""
+    if existing is None or existing["founder_tier"] in (None, "N/A"):
+        return failure_company
+    return replace(
+        failure_company,
+        founder_tier=existing["founder_tier"],
+        network_effect=existing["network_effect"],
+        network_effect_strength=existing["network_effect_strength"],
+        founder_tier_source=existing["founder_tier_source"],
+        founder_tier_as_of_date=existing["founder_tier_as_of_date"],
+        founder_extraction_fingerprint=existing["founder_extraction_fingerprint"],
+        founder_transition_date=existing["founder_transition_date"],
+    )
+
+
+def _cleanup_stale_placeholder(conn, company_name: str) -> None:
+    """Deletes a leftover placeholder_ticker() row for company_name, if
+    one exists, now that this run found a real ticker for it. Found live:
+    "UNVERIFIED::SEA-LIMITED" (written on an earlier run where Sea
+    Limited's match failed entirely) sitting in `companies` right
+    alongside SE, Sea Ltd's real, correctly-matched row, because
+    companies.ticker is the primary key — a placeholder and a later real
+    match for the same company_name are two different ticker values, so
+    upsert_company() never merges them into one row on its own. This is
+    the merge: called right after a candidate's match succeeds (match is
+    not None), for every branch that follows (delisted/unverified/fully
+    verified alike) — any of those means a real ticker now exists for
+    this company_name, so whatever placeholder might be left over from an
+    earlier total match failure is definitely stale."""
+    placeholder = placeholder_ticker(company_name)
+    if db.delete_company(conn, placeholder):
+        logger.info(
+            "Removed stale unverified placeholder %r for %r now that it resolved to a real ticker",
+            placeholder,
+            company_name,
+        )
 
 
 def _fetch_tier2_excerpt(candidate: Tier2Candidate) -> str:
@@ -258,12 +317,29 @@ def _run_tier2(
     for candidate in TIER2_CANDIDATES:
         match, verification = _resolve_tier2_ticker(candidate)
         if match is None:
+            # No candidate ticker at all (neither SEC nor OpenFIGI offered
+            # one). The brief's "never silently drop an entry" guardrail
+            # (same rule pipeline.py's biotech side follows) means this
+            # still gets written to `companies` as a flagged-unverified
+            # placeholder, not dropped — site.py's founder card renderer
+            # already has a distinct "ticker unverified" style for exactly
+            # this (verified = bool(row["ticker_verified"])), the same
+            # dashed treatment the biotech side uses. See
+            # _cleanup_stale_placeholder() below for the actual bug this
+            # was confused with: a placeholder written on a failed run and
+            # a real row written once a later run's match succeeds land as
+            # two separate `companies` rows (ticker is the primary key,
+            # and the placeholder's synthetic ticker never matches the
+            # real one) — found live as "UNVERIFIED::SEA-LIMITED" sitting
+            # alongside Sea Ltd's real, correctly-matched SE row. That's
+            # fixed by deleting the stale placeholder once a real match
+            # succeeds (see the "match is not None" path below), not by
+            # never writing one in the first place.
             logger.warning("No ticker match for company_name=%r", candidate.company_name)
-            ticker = placeholder_ticker(candidate.company_name)
             db.upsert_company(
                 conn,
                 Company(
-                    ticker=ticker,
+                    ticker=placeholder_ticker(candidate.company_name),
                     company_name=candidate.company_name,
                     country=candidate.country,
                     founder_tier="N/A",
@@ -274,9 +350,11 @@ def _run_tier2(
                     founder_name=candidate.founder_name,
                 ),
             )
-            processed.append(ticker)
+            processed.append(placeholder_ticker(candidate.company_name))
             run_summary.unverified_tickers += 1
             continue
+
+        _cleanup_stale_placeholder(conn, candidate.company_name)
 
         if verification.delisted_or_acquired:
             logger.warning(
@@ -316,25 +394,34 @@ def _run_tier2(
             )
             run_summary.unverified_tickers += 1
 
+        # Fetched before the excerpt attempt (not just after, as before)
+        # so a failed fetch can still tell a company that's never been
+        # classified apart from one with a real prior classification —
+        # see the two except branches below.
+        existing_before_fetch = db.get_company(conn, match.ticker)
+
         try:
             excerpt = _fetch_tier2_excerpt(candidate)
         except Exception:
             logger.exception("Leadership-page fetch failed for %s", match.ticker)
             db.upsert_company(
                 conn,
-                Company(
-                    ticker=match.ticker,
-                    company_name=match.matched_company_name,
-                    country=candidate.country,
-                    founder_tier="N/A",
-                    listing_type="primary",
-                    ticker_verified=verification.verified,
-                    ticker_verification_source=verification.source,
-                    ticker_verification_date=verification.checked_date,
-                    ticker_verification_reason=verification.reason,
-                    ticker_match_confidence=match.confidence,
-                    founder_name=candidate.founder_name,
-                    exchange=candidate.exchange,
+                _preserve_existing_classification(
+                    existing_before_fetch,
+                    Company(
+                        ticker=match.ticker,
+                        company_name=match.matched_company_name,
+                        country=candidate.country,
+                        founder_tier="N/A",
+                        listing_type="primary",
+                        ticker_verified=verification.verified,
+                        ticker_verification_source=verification.source,
+                        ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
+                        ticker_match_confidence=match.confidence,
+                        founder_name=candidate.founder_name,
+                        exchange=candidate.exchange,
+                    ),
                 ),
             )
             processed.append(match.ticker)
@@ -382,21 +469,24 @@ def _run_tier2(
                 logger.exception("Founder extraction failed for %s", match.ticker)
                 db.upsert_company(
                     conn,
-                    Company(
-                        ticker=match.ticker,
-                        company_name=match.matched_company_name,
-                        country=candidate.country,
-                        founder_tier="N/A",
-                        listing_type="primary",
-                        ticker_verified=verification.verified,
-                        ticker_verification_source=verification.source,
-                        ticker_verification_date=verification.checked_date,
-                        ticker_verification_reason=verification.reason,
-                        ticker_match_confidence=match.confidence,
-                        founder_name=candidate.founder_name,
-                        founder_tier_source=source_citation,
-                        founder_tier_as_of_date=date.today().isoformat(),
-                        exchange=candidate.exchange,
+                    _preserve_existing_classification(
+                        existing,
+                        Company(
+                            ticker=match.ticker,
+                            company_name=match.matched_company_name,
+                            country=candidate.country,
+                            founder_tier="N/A",
+                            listing_type="primary",
+                            ticker_verified=verification.verified,
+                            ticker_verification_source=verification.source,
+                            ticker_verification_date=verification.checked_date,
+                            ticker_verification_reason=verification.reason,
+                            ticker_match_confidence=match.confidence,
+                            founder_name=candidate.founder_name,
+                            founder_tier_source=source_citation,
+                            founder_tier_as_of_date=date.today().isoformat(),
+                            exchange=candidate.exchange,
+                        ),
                     ),
                 )
                 processed.append(match.ticker)
@@ -490,6 +580,11 @@ def run() -> RunSummary:
         for candidate in TIER1_CANDIDATES:
             match, verification = resolve_ticker(candidate.company_name)
             if match is None:
+                # See _run_tier2's identical branch for the full reasoning
+                # — this is exactly the Sea Limited/TIER1_CANDIDATES path
+                # that produced the live "UNVERIFIED::SEA-LIMITED" row, and
+                # the fix is _cleanup_stale_placeholder() below, not
+                # skipping this write.
                 logger.warning("No ticker match for company_name=%r", candidate.company_name)
                 ticker = placeholder_ticker(candidate.company_name)
                 db.upsert_company(
@@ -509,6 +604,8 @@ def run() -> RunSummary:
                 processed.append(ticker)
                 run_summary.unverified_tickers += 1
                 continue
+
+            _cleanup_stale_placeholder(conn, candidate.company_name)
 
             if verification.delisted_or_acquired:
                 # Terminal state for this screener's purpose — a delisted/
@@ -553,29 +650,71 @@ def run() -> RunSummary:
                 )
                 run_summary.unverified_tickers += 1
 
+            # Fetched before the filing/excerpt attempts (not just after
+            # a successful one, as before) so either failure branch below
+            # can tell a company that's never been classified apart from
+            # one with a real prior classification — same fix as
+            # _run_tier2's identical pattern, applied here after writing a
+            # test for this branch surfaced that Tier 1 had the same gap.
+            existing_before_fetch = db.get_company(conn, match.ticker)
+
             filing = get_latest_annual_filing(match.ticker)
             if filing is None:
                 logger.warning("No annual filing found for %s", match.ticker)
-                company = Company(
-                    ticker=match.ticker,
-                    company_name=match.matched_company_name,
-                    country=candidate.country,
-                    founder_tier="N/A",
-                    listing_type="ADR",
-                    ticker_verified=verification.verified,
-                    ticker_verification_source=verification.source,
-                    ticker_verification_date=verification.checked_date,
-                    ticker_verification_reason=verification.reason,
-                    ticker_match_confidence=match.confidence,
-                    founder_name=candidate.founder_name,
+                company = _preserve_existing_classification(
+                    existing_before_fetch,
+                    Company(
+                        ticker=match.ticker,
+                        company_name=match.matched_company_name,
+                        country=candidate.country,
+                        founder_tier="N/A",
+                        listing_type="ADR",
+                        ticker_verified=verification.verified,
+                        ticker_verification_source=verification.source,
+                        ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
+                        ticker_match_confidence=match.confidence,
+                        founder_name=candidate.founder_name,
+                    ),
                 )
                 db.upsert_company(conn, company)
                 processed.append(match.ticker)
                 run_summary.filing_lookup_failures += 1
                 continue
 
-            text = fetch_filing_text(filing.document_url)
-            excerpt = extract_leadership_excerpt(text, candidate.founder_name)
+            try:
+                text = fetch_filing_text(filing.document_url)
+                excerpt = extract_leadership_excerpt(text, candidate.founder_name)
+            except Exception:
+                # Previously uncaught entirely — a fetch_filing_text
+                # failure here propagated straight out of run()'s
+                # `with db.connect() as conn:` block, rolling back every
+                # change made in that whole run (both tiers) rather than
+                # just this one candidate's. Now handled the same way
+                # _run_tier2's excerpt-fetch failure always has been.
+                logger.exception("Filing text fetch/excerpt failed for %s", match.ticker)
+                company = _preserve_existing_classification(
+                    existing_before_fetch,
+                    Company(
+                        ticker=match.ticker,
+                        company_name=match.matched_company_name,
+                        country=candidate.country,
+                        founder_tier="N/A",
+                        listing_type="ADR",
+                        ticker_verified=verification.verified,
+                        ticker_verification_source=verification.source,
+                        ticker_verification_date=verification.checked_date,
+                        ticker_verification_reason=verification.reason,
+                        ticker_match_confidence=match.confidence,
+                        founder_name=candidate.founder_name,
+                        exchange=filing.exchange,
+                        sector=filing.sector,
+                    ),
+                )
+                db.upsert_company(conn, company)
+                processed.append(match.ticker)
+                run_summary.filing_lookup_failures += 1
+                continue
 
             source_citation = f"{filing.form}:{filing.document_url}"
             fingerprint = _founder_extraction_fingerprint(candidate.company_name, excerpt)
@@ -613,22 +752,25 @@ def run() -> RunSummary:
                     logger.exception("Founder extraction failed for %s", match.ticker)
                     db.upsert_company(
                         conn,
-                        Company(
-                            ticker=match.ticker,
-                            company_name=match.matched_company_name,
-                            country=candidate.country,
-                            founder_tier="N/A",
-                            listing_type="ADR",
-                            ticker_verified=verification.verified,
-                            ticker_verification_source=verification.source,
-                            ticker_verification_date=verification.checked_date,
-                            ticker_verification_reason=verification.reason,
-                            ticker_match_confidence=match.confidence,
-                            founder_name=candidate.founder_name,
-                            founder_tier_source=source_citation,
-                            founder_tier_as_of_date=filing.filing_date,
-                            exchange=filing.exchange,
-                            sector=filing.sector,
+                        _preserve_existing_classification(
+                            existing,
+                            Company(
+                                ticker=match.ticker,
+                                company_name=match.matched_company_name,
+                                country=candidate.country,
+                                founder_tier="N/A",
+                                listing_type="ADR",
+                                ticker_verified=verification.verified,
+                                ticker_verification_source=verification.source,
+                                ticker_verification_date=verification.checked_date,
+                                ticker_verification_reason=verification.reason,
+                                ticker_match_confidence=match.confidence,
+                                founder_name=candidate.founder_name,
+                                founder_tier_source=source_citation,
+                                founder_tier_as_of_date=filing.filing_date,
+                                exchange=filing.exchange,
+                                sector=filing.sector,
+                            ),
                         ),
                     )
                     processed.append(match.ticker)

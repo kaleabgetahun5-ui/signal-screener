@@ -55,7 +55,44 @@ def test_zalando_verifies_via_base_ticker_fallback_and_returns_resolved_ticker()
     ):
         result = verify_ticker("ZAL", "Zalando")
     assert result.verified is True
-    assert result.resolved_ticker in ("ZAL.HM", "ZAL.DE")
+    # Deterministic tie-break (symbol ascending) — see the two tests below
+    # for why this must not vary by API response order.
+    assert result.resolved_ticker == "ZAL.DE"
+
+
+def test_tied_name_score_candidates_resolve_the_same_ticker_regardless_of_api_order():
+    """Regression test for the real bug found live: Zalando's XETRA
+    listing (ZAL.DE) and Frankfurt floor listing (ZAL.F) are both
+    literally named "Zalando SE" and tie on name score — Yahoo's
+    unofficial search endpoint doesn't guarantee stable result ordering
+    run to run, and the old max()-based tie-break picked whichever
+    candidate happened to come first in that response, so the resolved
+    ticker for the same real company could silently flip from one
+    pipeline run to the next. Since companies.ticker is the primary key,
+    a flip meant a second, duplicate company row instead of an update to
+    the existing one. This must resolve identically no matter which order
+    the two tied candidates appear in."""
+    order_a = _yahoo_quotes(("ZAL.DE", "Zalando SE"), ("ZAL.F", "Zalando SE"))
+    order_b = _yahoo_quotes(("ZAL.F", "Zalando SE"), ("ZAL.DE", "Zalando SE"))
+
+    with patch.object(ticker_verify.requests, "get", return_value=order_a):
+        result_a = verify_ticker("ZAL", "Zalando")
+    with patch.object(ticker_verify.requests, "get", return_value=order_b):
+        result_b = verify_ticker("ZAL", "Zalando")
+
+    assert result_a.resolved_ticker == result_b.resolved_ticker == "ZAL.DE"
+
+
+def test_tie_break_prefers_lower_symbol_when_name_scores_are_equal():
+    """Direct unit check of the tie-break rule itself (name score desc,
+    symbol asc), independent of Zalando's specific tickers."""
+    with patch.object(
+        ticker_verify.requests,
+        "get",
+        return_value=_yahoo_quotes(("AAA.ZZ", "Example Co"), ("AAA.AA", "Example Co")),
+    ):
+        result = verify_ticker("AAA", "Example Co")
+    assert result.resolved_ticker == "AAA.AA"
 
 
 def test_exact_match_does_not_set_resolved_ticker():

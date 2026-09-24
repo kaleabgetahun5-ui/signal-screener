@@ -367,3 +367,26 @@ def test_get_known_discovery_tickers_combines_companies_and_candidates(tmp_path,
 
         known = db.get_known_discovery_tickers(conn)
         assert known == {"EXISTING", "DISC"}
+
+
+def test_delete_company_removes_row_and_reports_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    from signal_screener.models import Company
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(conn, Company(ticker="UNVERIFIED::TEST-CO", company_name="Test Co"))
+        removed = db.delete_company(conn, "UNVERIFIED::TEST-CO")
+    assert removed is True
+    with db.connect() as conn:
+        assert db.get_company(conn, "UNVERIFIED::TEST-CO") is None
+
+
+def test_delete_company_returns_false_for_unknown_ticker(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    db = importlib.reload(importlib.import_module("signal_screener.db"))
+    db.init_db()
+    with db.connect() as conn:
+        removed = db.delete_company(conn, "NOPE")
+    assert removed is False

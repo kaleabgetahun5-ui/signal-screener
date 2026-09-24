@@ -50,10 +50,27 @@ because both verify and the tie-break has no way to know HKEX is the
 "real" one — a bigger accuracy issue than it sounds, since
 track_record.py prices off of whatever ticker ends up here, and OTC
 pink-sheet pricing for a name like this can be stale/illiquid next to
-its actual home-exchange price. Left unset for Zalando/Naver, which
-already resolve correctly without it. The same OTC-ticker trap hit
-Adyen too (resolves to ADYYF over the real Euronext Amsterdam listing,
-ADYEN.AS) — confirmed live, same fix.
+its actual home-exchange price. Left unset for Naver, which resolves
+correctly without it. The same OTC-ticker trap hit Adyen too (resolves
+to ADYYF over the real Euronext Amsterdam listing, ADYEN.AS) — confirmed
+live, same fix.
+
+Zalando also needed this, found live: unlike Tencent/Adyen's problem
+(a thin OTC listing outranking the real one), Zalando's OpenFIGI/Yahoo
+results tie two *real* listings of the same security on name score —
+its XETRA listing (ZAL.DE) and its Frankfurt floor listing (ZAL.F), both
+literally named "Zalando SE." matching/ticker_verify.py's tie-break for
+that case is now a deterministic sort (see its own comment), which fixes
+the "which one wins" question from flipping run to run — but doesn't by
+itself say XETRA is the *right* one to prefer, only that the choice is
+now stable. known_ticker pins that explicitly: XETRA is Zalando's real
+primary listing, Frankfurt is a secondary regional venue for the same
+security. Before this fix, a resolved ticker flipping between the two on
+different days meant a second, duplicate `companies` row (ticker is the
+primary key) instead of an update to the existing one — confirmed live,
+same failure mode as the OTC-listing problem above even though the root
+cause here was tie-break non-determinism, not one listing being clearly
+wrong.
 
 Netherlands (Adyen): only Pieter van der Does (Co-Founder & Co-CEO) is
 tracked. Co-founder Arnout Schuijff stepped down from the management
@@ -77,7 +94,9 @@ class Tier2Candidate:
 
 
 TIER2_CANDIDATES = [
-    Tier2Candidate("Zalando", "Robert Gentz", "Germany", "XETRA", "DE"),
+    Tier2Candidate(
+        "Zalando", "Robert Gentz", "Germany", "XETRA", "DE", known_ticker="ZAL.DE"
+    ),
     Tier2Candidate(
         "Naver", "Lee Hae-jin", "South Korea", "KOSPI", "KR", founder_name_local="이해진"
     ),

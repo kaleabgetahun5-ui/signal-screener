@@ -6,12 +6,75 @@ from signal_screener.founder_pipeline import (
     _effective_transition_date,
     _fetch_backtest_for,
     _fetch_valuation_for,
+    _preserve_existing_classification,
     _resolve_tier2_ticker,
 )
 from signal_screener.matching.ticker_match import TickerMatch
 from signal_screener.matching.ticker_verify import VerificationResult
+from signal_screener.models import Company
 from signal_screener.sources.founder_led_tier2 import Tier2Candidate
 from signal_screener.valuation import ValuationMetrics
+
+
+def _failure_company(**overrides):
+    fields = dict(
+        ticker="035420.KS",
+        company_name="NAVER CORP",
+        country="South Korea",
+        founder_tier="N/A",
+        listing_type="primary",
+        ticker_verified=True,
+        ticker_verification_source="yahoo_finance_search",
+        ticker_verification_date="2026-09-21",
+        ticker_verification_reason="symbol and company name confirmed",
+        ticker_match_confidence=100.0,
+        founder_name="Lee Hae-jin",
+        exchange="KOSPI",
+    )
+    fields.update(overrides)
+    return Company(**fields)
+
+
+def test_preserve_existing_classification_returns_failure_company_when_never_classified():
+    """No prior real classification to preserve — a company that's never
+    been successfully classified still needs to show up as such."""
+    result = _preserve_existing_classification(None, _failure_company())
+    assert result.founder_tier == "N/A"
+
+    never_classified_row = {"founder_tier": "N/A"}
+    result = _preserve_existing_classification(never_classified_row, _failure_company())
+    assert result.founder_tier == "N/A"
+
+
+def test_preserve_existing_classification_keeps_prior_real_tier_on_failure():
+    """Regression test for the real bug found live: Naver stuck at
+    founder_tier 'N/A' for weeks because every caught excerpt-fetch/
+    extraction failure overwrote its last real classification
+    (Founder-departed, from real DART data) with the N/A placeholder —
+    every single day it failed, permanently, even after the underlying
+    transient cause had long passed."""
+    existing_row = {
+        "founder_tier": "Founder-departed",
+        "network_effect": "Naver operates an established network effect...",
+        "network_effect_strength": "Established",
+        "founder_tier_source": "KR:DART exctvSttus corp_code=00266961",
+        "founder_tier_as_of_date": "2026-08-29",
+        "founder_extraction_fingerprint": "6ac786675c96c16c21cf9d798adf62d67f941dd3",
+        "founder_transition_date": "2015-12-31",
+    }
+    failure = _failure_company(
+        ticker_verification_date="2026-09-22",  # today's real, successful verification
+    )
+    result = _preserve_existing_classification(existing_row, failure)
+
+    assert result.founder_tier == "Founder-departed"
+    assert result.network_effect_strength == "Established"
+    assert result.founder_tier_source == "KR:DART exctvSttus corp_code=00266961"
+    assert result.founder_extraction_fingerprint == "6ac786675c96c16c21cf9d798adf62d67f941dd3"
+    assert result.founder_transition_date == "2015-12-31"
+    # Verification fields reflect today's real check, not the stale ones.
+    assert result.ticker_verification_date == "2026-09-22"
+    assert result.ticker_verified is True
 
 
 def test_recent_transition_keeps_founder_chair():

@@ -477,6 +477,18 @@ def get_company(conn: sqlite3.Connection, ticker: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM companies WHERE ticker = ?", (ticker,)).fetchone()
 
 
+def delete_company(conn: sqlite3.Connection, ticker: str) -> bool:
+    """Returns True iff a row was actually removed. founder_pipeline.py
+    uses this to clean up a stale placeholder_ticker() row
+    (matching/ticker_match.py) once the same company_name resolves to a
+    real ticker on a later run — companies.ticker is the primary key, so
+    an earlier failed-match placeholder and a later real match land as
+    two separate rows for the same company rather than one being updated
+    into the other; this is what merges them back into one."""
+    cur = conn.execute("DELETE FROM companies WHERE ticker = ?", (ticker,))
+    return cur.rowcount > 0
+
+
 def insert_ownership(conn: sqlite3.Connection, ownership: Ownership):
     conn.execute(
         """
