@@ -223,9 +223,9 @@ def test_match_company_to_ticker_openfigi_candidates_ranks_dead_and_live_listing
     }
     with patch.object(ticker_match.requests, "post", return_value=_FakeResponse(candidates)):
         candidates_out = match_company_to_ticker_openfigi_candidates("Naver")
-    tickers = [c.ticker for c in candidates_out]
-    assert tickers == ["NHNCF", "035420"]  # US+composite still ranks first
-    assert match_company_to_ticker_openfigi("Naver").ticker == "NHNCF"  # single-guess wrapper unchanged
+        tickers = [c.ticker for c in candidates_out]
+        assert tickers == ["NHNCF", "035420"]  # US+composite still ranks first
+        assert match_company_to_ticker_openfigi("Naver").ticker == "NHNCF"  # single-guess wrapper unchanged
 
 
 def test_match_company_to_ticker_openfigi_returns_none_below_threshold():
