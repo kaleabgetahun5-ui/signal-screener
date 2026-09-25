@@ -104,6 +104,18 @@ def detect_founder_leadership(*, company_name: str, report_excerpt: str) -> Foun
     response = client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=500,
+        # Pinned to 0 for determinism: this call is a binary detection gate
+        # (founder_detected true/false) that decides whether a company ever
+        # becomes reviewable, not a generative task where variety matters.
+        # Left unpinned (API default), the same excerpt was observed to
+        # flip true/false across identical re-runs (confirmed live on
+        # AppLovin/APP) -- that variance is invisible for a "false" result
+        # specifically, since a not-detected company is silently skipped
+        # with no stored evidence, unlike a verified match (see run()'s
+        # no_founder_detected branch). Pinning temperature doesn't
+        # eliminate model error, but it removes sampling noise as a
+        # separate, undetectable source of missed candidates.
+        temperature=0,
         messages=[{"role": "user", "content": prompt}],
     )
     raw_text = response.content[0].text.strip()
