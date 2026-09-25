@@ -17,7 +17,7 @@ def _mock_response(payload: dict):
     return response
 
 
-def _run_with_mock_response(payload: dict):
+def _run_with_mock_response(payload: dict, *, report_excerpt: str = "Jane Founder is our CEO."):
     with patch.object(fde, "ANTHROPIC_API_KEY", "fake-key"), patch.object(
         fde.anthropic, "Anthropic"
     ) as mock_anthropic_cls:
@@ -25,7 +25,7 @@ def _run_with_mock_response(payload: dict):
         mock_client.messages.create.return_value = _mock_response(payload)
         mock_anthropic_cls.return_value = mock_client
         return fde.detect_founder_leadership(
-            company_name="Test Co", report_excerpt="Jane Founder is our CEO."
+            company_name="Test Co", report_excerpt=report_excerpt
         )
 
 
@@ -152,6 +152,38 @@ def test_supporting_quote_matches_despite_whitespace_differences():
         }
     )
     assert result.founder_detected is True
+
+
+def test_supporting_quote_matches_despite_curly_vs_straight_punctuation():
+    """Regression test for a real false negative found live against
+    Alexandria Real Estate (ARE): the filing text used a curly apostrophe
+    ("Alexandria's" with U+2019), but Claude's returned quote used a plain
+    ASCII apostrophe for the identical, genuinely-present sentence — the
+    grounding check's straight substring test failed even though the
+    quote was real and correct, silently turning a correct
+    founder_detected: true into a false negative. Confirmed live by
+    inspecting the raw API response directly (it already said true with
+    this exact quote) -- purely a code-level Unicode mismatch, not a
+    prompt or model-reasoning problem."""
+    excerpt = (
+        "More than three decades ago, Alexandria’s Executive Chairman "
+        "and Founder, Joel S. Marcus, led the formation of the company."
+    )
+    result = _run_with_mock_response(
+        {
+            "founder_detected": True,
+            "founder_name": "Joel S. Marcus",
+            "current_title": "Executive Chairman and Founder",
+            "ownership_pct_numeric": None,
+            "ownership_stake": "not disclosed in this excerpt",
+            # Straight apostrophe, unlike the excerpt's curly one.
+            "supporting_quote": "Alexandria's Executive Chairman and Founder, Joel S. Marcus, led the formation of the company.",
+            "reasoning": "grounded",
+        },
+        report_excerpt=excerpt,
+    )
+    assert result.founder_detected is True
+    assert result.founder_name == "Joel S. Marcus"
 
 
 def test_missing_api_key_raises():

@@ -53,6 +53,12 @@ Rules — do not guess or infer beyond what this excerpt explicitly states:
   company's own name may appear nearby on the same page. Only a founder
   claim that is explicitly and unambiguously about {company_name} itself
   counts.
+- A clearly-grounded claim about {company_name} itself is NOT invalidated by
+  the presence of separate, unrelated "Founder of X" mentions elsewhere in
+  the same excerpt (e.g., other directors' own outside-company bios). Judge
+  the {company_name}-specific claim on its own merits — the existence of
+  other founder mentions nearby is not itself a reason to reject an
+  otherwise clear, correctly-grounded claim about {company_name}.
 - founder_name must be the person's name exactly as it appears in the excerpt.
 - current_title must be their title exactly as stated in the excerpt (e.g.
   "Chief Executive Officer", "Executive Chairman") — not a paraphrase.
@@ -85,13 +91,36 @@ class FounderDetection:
     generated_at: str
 
 
+# Real false negative found live against Alexandria Real Estate (ARE): the
+# raw filing text uses a curly apostrophe ("Alexandria's" with U+2019), but
+# Claude's returned quote used a plain ASCII apostrophe ("Alexandria's" with
+# U+0027) for the identical, genuinely-present sentence — a straight
+# substring check failed even though the quote was real and correctly
+# grounded, silently turning a correct founder_detected: true into a false
+# negative. Not a prompt or model-reasoning problem at all (confirmed by
+# inspecting the raw API response directly: it already said true, with this
+# exact quote) — purely a code-level Unicode mismatch in the grounding
+# check itself.
+_QUOTE_NORMALIZE_TABLE = str.maketrans(
+    {
+        "‘": "'", "’": "'",  # curly single quotes/apostrophe
+        "“": '"', "”": '"',  # curly double quotes
+        "–": "-", "—": "-",  # en dash, em dash
+    }
+)
+
+
 def _normalize_for_quote_check(text: str) -> str:
-    """Collapses whitespace so a quote check isn't defeated by the
-    line-wrap/multi-space normalization already applied when the filing
-    text was extracted (filings/sec_edgar.py's fetch_filing_text already
-    collapses runs of whitespace to single spaces, but Claude's returned
-    quote may still differ in incidental spacing around punctuation)."""
-    return re.sub(r"\s+", " ", text).strip()
+    """Collapses whitespace and common Unicode punctuation variants (smart
+    quotes, dashes) to their ASCII equivalents, so a quote check isn't
+    defeated by either the line-wrap/multi-space normalization already
+    applied when the filing text was extracted (filings/sec_edgar.py's
+    fetch_filing_text collapses whitespace runs, but Claude's returned
+    quote may still differ in incidental spacing around punctuation) or by
+    Claude rendering a curly quote/dash from the source as its plain ASCII
+    equivalent (see module-level comment above)."""
+    normalized = text.translate(_QUOTE_NORMALIZE_TABLE)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def detect_founder_leadership(*, company_name: str, report_excerpt: str) -> FounderDetection:
