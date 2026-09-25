@@ -115,7 +115,16 @@ def detect_founder_leadership(*, company_name: str, report_excerpt: str) -> Foun
         # no_founder_detected branch). Pinning temperature doesn't
         # eliminate model error, but it removes sampling noise as a
         # separate, undetectable source of missed candidates.
-        temperature=0,
+        #
+        # Passed via extra_body, not the typed `temperature=` kwarg: this
+        # environment's installed anthropic SDK build doesn't expose
+        # `temperature` as a first-class parameter (confirmed live --
+        # `messages.create()` raised TypeError for it), unlike the
+        # standard public SDK this project's pyproject.toml declares
+        # (anthropic>=0.40). extra_body merges straight into the raw JSON
+        # request body regardless of what the SDK's typed wrapper exposes,
+        # so this reaches the API the same way either form would.
+        extra_body={"temperature": 0},
         messages=[{"role": "user", "content": prompt}],
     )
     raw_text = response.content[0].text.strip()
