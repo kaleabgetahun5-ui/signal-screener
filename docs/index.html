@@ -94,9 +94,42 @@
 
   footer{margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
 
+  /* Per-visitor personal watchlist (Supabase-backed) — buttons stay hidden
+     unless the page was generated with Supabase configured, see
+     SUPABASE_CONFIGURED above. */
+  .my-watchlist-toggle{display:none;}
+  body.supabase-enabled .my-watchlist-toggle{
+    display:inline-flex; align-items:center; gap:6px; margin-left:auto;
+    font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft);
+    background:var(--bg); border:1px solid var(--line); border-radius:20px;
+    padding:4px 12px; cursor:pointer;
+  }
+  body.supabase-enabled .my-watchlist-toggle:hover{border-color:var(--ink-soft);}
+  body.supabase-enabled .my-watchlist-toggle[aria-pressed="true"]{
+    background:var(--high-bg); color:var(--high); border-color:var(--high);
+  }
+  body.supabase-enabled .verify-row{justify-content:space-between;}
+
+  .signin-box{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0 4px;}
+  .signin-box input[type="email"]{
+    font-family:'IBM Plex Sans', sans-serif; font-size:14px; padding:9px 12px;
+    border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink);
+    flex:1; min-width:200px;
+  }
+  .signin-box button{
+    font-family:'IBM Plex Sans', sans-serif; font-size:14px; font-weight:500; padding:9px 16px;
+    border:1px solid var(--ink); border-radius:6px; background:var(--ink); color:#fff; cursor:pointer;
+  }
+  .signin-status{font-size:13px; color:var(--ink-soft); margin-top:6px;}
+  .signedin-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0 4px;}
+  .signedin-row button{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; padding:5px 12px;
+    border:1px solid var(--line); border-radius:20px; background:var(--card); color:var(--ink-soft); cursor:pointer;
+  }
+
 </style>
 </head>
-<body>
+<body class="supabase-enabled">
 <div class="wrap">
 
   <header>
@@ -117,7 +150,7 @@
   <h2 class="section-title">★ Your watchlist</h2>
   <div class="new-since">
     <h3 class="subsection-title">Biotech signals</h3><p class="sub">Nothing here.</p><h3 class="subsection-title">Founder-led companies</h3>
-  <div class="card">
+  <div class="card" data-entry-id="BE" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Bloom Energy Corp</div>
@@ -148,13 +181,33 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1664703/000162828026024237/be-20260408.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/BE" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="BE" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
+  </div>
+  
+  <h2 class="section-title">☆ My personal watchlist</h2>
+  <div class="new-since">
+    <p class="sub">Sign in with your email to keep your own private watchlist — separate from the owner's picks above. Click "+ My watchlist" on any card below to add it. No password: you'll get a one-time sign-in link by email.</p>
+    <div id="my-watchlist-signin" class="signin-box-wrap">
+      <form id="my-watchlist-email-form" class="signin-box">
+        <input type="email" id="my-watchlist-email" placeholder="you@example.com" required>
+        <button type="submit">Email me a sign-in link</button>
+      </form>
+      <div id="my-watchlist-email-status" class="signin-status"></div>
+    </div>
+    <div id="my-watchlist-signedin" class="signedin-row" style="display:none;">
+      <span class="sub">Signed in as <strong id="my-watchlist-user-email"></strong></span>
+      <button type="button" id="my-watchlist-signout">Sign out</button>
+    </div>
+    <div id="my-watchlist-list" style="margin-top:14px;">
+      <p class="sub">Sign in above to keep your own personal watchlist.</p>
+    </div>
   </div>
 
   <h2 class="section-title">Biotech signals</h2>
   
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="c59e44d78ab40bb7" data-entry-type="designation">
     <div class="tab moderate"></div>
     <div class="body">
       <div class="top-row">
@@ -170,10 +223,11 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT04775485" target="_blank" rel="noopener">ClinicalTrials.gov (NCT04775485)</a><a href="https://finance.yahoo.com/quote/DAWN" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="c59e44d78ab40bb7" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="390dfc241b225c0a" data-entry-type="designation">
     <div class="tab high"></div>
     <div class="body">
       <div class="top-row">
@@ -189,10 +243,11 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT03745287" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03745287)</a><a href="https://www.globenewswire.com/news-release/2021/04/26/2216841/0/en/Vertex-and-CRISPR-Therapeutics-Announce-Priority-Medicines-PRIME-Designation-Granted-by-the-European-Medicines-Agency-to-CTX001-for-Transfusion-Dependent-Beta-Thalassemia.html" target="_blank" rel="noopener">Designation date source</a><a href="https://finance.yahoo.com/quote/VRTX" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="390dfc241b225c0a" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="cc178b137b0e1a6e" data-entry-type="designation">
     <div class="tab high"></div>
     <div class="body">
       <div class="top-row">
@@ -208,10 +263,11 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT03745287" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03745287)</a><a href="https://finance.yahoo.com/quote/VRTX" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="cc178b137b0e1a6e" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="324d564d8f11bd8f" data-entry-type="designation">
     <div class="tab high"></div>
     <div class="body">
       <div class="top-row">
@@ -227,10 +283,11 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT03745287" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03745287)</a><a href="https://www.globenewswire.com/news-release/2020/09/22/2097309/0/en/CRISPR-Therapeutics-and-Vertex-Pharmaceuticals-Announce-Priority-Medicines-PRIME-Designation-Granted-by-the-European-Medicines-Agency-EMA-to-CTX001-for-the-Treatment-of-Sickle-Cell.html" target="_blank" rel="noopener">Designation date source</a><a href="https://finance.yahoo.com/quote/VRTX" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="324d564d8f11bd8f" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="e63ae8afca8ffeba" data-entry-type="designation">
     <div class="tab high"></div>
     <div class="body">
       <div class="top-row">
@@ -246,10 +303,11 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT03887455" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03887455)</a><a href="https://finance.yahoo.com/quote/ESAIY" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="e63ae8afca8ffeba" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="32bcd2fd3fa02d80" data-entry-type="designation">
     <div class="tab high"></div>
     <div class="body">
       <div class="top-row">
@@ -265,6 +323,7 @@
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         <a href="https://clinicaltrials.gov/study/NCT03394365" target="_blank" rel="noopener">ClinicalTrials.gov (NCT03394365)</a><a href="https://www.sec.gov/Archives/edgar/data/1604464/000119312517382414/d489039dex991.htm" target="_blank" rel="noopener">Designation date source</a><a href="https://finance.yahoo.com/quote/ATRA" target="_blank" rel="noopener">Current price</a>
+        <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="32bcd2fd3fa02d80" data-entry-type="designation">+ My watchlist</button>
       </div>
     </div>
   </div>
@@ -275,7 +334,7 @@
 
   <h2 class="section-title">Founder-led companies</h2>
   
-  <div class="card">
+  <div class="card" data-entry-id="AKAM" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">AKAMAI TECHNOLOGIES INC</div>
@@ -306,9 +365,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1086222/000108622226000042/akam-20260330.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/AKAM" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="AKAM" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="AXON" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">AXON ENTERPRISE, INC.</div>
@@ -339,9 +399,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1069183/000162828026025521/axon-20260416.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/AXON" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="AXON" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="ADYEN.AS" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Adyen</div>
@@ -349,7 +410,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> Netherlands · <strong>Founder:</strong> Pieter van der Does · <strong>Network effect:</strong> [Emerging] Adyen&#x27;s payment platform exhibits an emerging network effect as it connects merchants and payment methods, where adding more merchants can attract more payment providers and vice versa, though the primary value proposition remains the infrastructure and technical capabilities rather than network size.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 29.1B EUR · <strong>P/E:</strong> 25.9 (fwd 19.7) · <strong>52-wk range:</strong> 772.40–1,600.80 EUR · <strong>Beta:</strong> 1.89 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 29.4B EUR · <strong>P/E:</strong> 27.2 (fwd 19.9) · <strong>52-wk range:</strong> 772.40–1,600.80 EUR · <strong>Beta:</strong> 1.89 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Co-Chief Executive Officer Ownership stake: 3.0% (as of 2026-10-07).</div>
       
       
@@ -357,24 +418,25 @@
     <div class="backtest-title">$100 invested at IPO (2018-06-13) vs. S&amp;P 500</div>
     <div class="bt-row">
       <div class="bt-label">ADYEN.AS</div>
-      <div class="bt-track"><div class="bt-fill stock" style="width:71.9%"></div></div>
-      <div class="bt-value">~202 EUR</div>
+      <div class="bt-track"><div class="bt-fill stock" style="width:72.9%"></div></div>
+      <div class="bt-value">~205 EUR</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
       <div class="bt-track"><div class="bt-fill index" style="width:100.0%"></div></div>
       <div class="bt-value">~$281</div>
     </div>
-    <div class="bt-note">Based on ADYEN.AS at EUR 920.80 (as of 2026-10-12) vs. EUR 455.00 at IPO; S&amp;P 500 at $7,807.24 today vs. $2,775.63 on 2018-06-13. Price appreciation only — dividends not included on either side. The ADYEN.AS figures are in EUR, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
+    <div class="bt-note">Based on ADYEN.AS at EUR 932.40 (as of 2026-10-13) vs. EUR 455.00 at IPO; S&amp;P 500 at $7,804.11 today vs. $2,775.63 on 2018-06-13. Price appreciation only — dividends not included on either side. The ADYEN.AS figures are in EUR, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://investors.adyen.com/governance" target="_blank" rel="noopener">SEC NL filing</a><a href="https://finance.yahoo.com/quote/ADYEN.AS" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="ADYEN.AS" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="ABNB" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Airbnb, Inc.</div>
@@ -405,9 +467,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1559720/000119312526175062/d936646ddef14a.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/ABNB" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="ABNB" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="APO" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Apollo Global Management, Inc.</div>
@@ -438,9 +501,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1858681/000119312526177321/d948913ddef14a.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/APO" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="APO" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="APP" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">AppLovin Corp</div>
@@ -471,9 +535,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1751008/000175100826000028/app-20260420.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/APP" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="APP" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="BE" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Bloom Energy Corp</div>
@@ -504,9 +569,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1664703/000162828026024237/be-20260408.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/BE" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="BE" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="CPNG" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Coupang, Inc.</div>
@@ -514,7 +580,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> South Korea · <strong>Founder:</strong> Bom Kim · <strong>Network effect:</strong> [Established] Coupang operates an established two-sided marketplace connecting consumers with sellers and service providers, with significant scale in South Korea creating switching costs through delivery infrastructure, product selection, and buyer-seller liquidity that has compounded over multiple years.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 27.5B USD · <strong>P/E:</strong> not available (fwd 56.1) · <strong>52-wk range:</strong> 13.35–32.35 USD · <strong>Beta:</strong> 1.17 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 27.1B USD · <strong>P/E:</strong> not available (fwd 54.5) · <strong>52-wk range:</strong> 13.35–32.35 USD · <strong>Beta:</strong> 1.17 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Chief Executive Officer and Chairman of the Board Ownership stake: 74.3% (as of 2026-04-27).</div>
       
       
@@ -522,7 +588,7 @@
     <div class="backtest-title">$100 invested at IPO (2021-03-11) vs. S&amp;P 500</div>
     <div class="bt-row">
       <div class="bt-label">CPNG</div>
-      <div class="bt-track"><div class="bt-fill stock" style="width:15.7%"></div></div>
+      <div class="bt-track"><div class="bt-fill stock" style="width:15.5%"></div></div>
       <div class="bt-value">~$31</div>
     </div>
     <div class="bt-row">
@@ -530,16 +596,17 @@
       <div class="bt-track"><div class="bt-fill index" style="width:100.0%"></div></div>
       <div class="bt-value">~$198</div>
     </div>
-    <div class="bt-note">Based on CPNG at $15.28 (as of 2026-10-12) vs. $49.25 at IPO; S&amp;P 500 at $7,807.24 today vs. $3,939.34 on 2021-03-11. Price appreciation only — dividends not included on either side.</div>
+    <div class="bt-note">Based on CPNG at $15.10 (as of 2026-10-13) vs. $49.25 at IPO; S&amp;P 500 at $7,804.11 today vs. $3,939.34 on 2021-03-11. Price appreciation only — dividends not included on either side.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1834584/000114036126017102/ny20063059x1_def14a.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/CPNG" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="CPNG" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="GRAB" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Grab Holdings Ltd</div>
@@ -547,7 +614,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> Singapore · <strong>Founder:</strong> Anthony Tan · <strong>Network effect:</strong> [Established] Grab operates an established network effect as a multi-sided platform connecting drivers, merchants, and consumers across ride-hailing and delivery services, where increased supply attracts more demand and vice versa, creating compounding value and switching costs that have scaled across Southeast Asia since 2012.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 12.9B USD · <strong>P/E:</strong> 28.6 (fwd 23.1) · <strong>52-wk range:</strong> 2.74–6.24 USD · <strong>Beta:</strong> 0.91 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 12.4B USD · <strong>P/E:</strong> 27.5 (fwd 22.2) · <strong>52-wk range:</strong> 2.74–6.24 USD · <strong>Beta:</strong> 0.91 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Founder, Chairman and Chief Executive Officer Ownership stake: 3.2% (as of 2026-03-06).</div>
       
       
@@ -555,24 +622,25 @@
     <div class="backtest-title">$100 invested at IPO (2020-12-01) vs. S&amp;P 500</div>
     <div class="bt-row">
       <div class="bt-label">GRAB</div>
-      <div class="bt-track"><div class="bt-fill stock" style="width:12.4%"></div></div>
-      <div class="bt-value">~$26</div>
+      <div class="bt-track"><div class="bt-fill stock" style="width:11.9%"></div></div>
+      <div class="bt-value">~$25</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
       <div class="bt-track"><div class="bt-fill index" style="width:100.0%"></div></div>
       <div class="bt-value">~$213</div>
     </div>
-    <div class="bt-note">Based on GRAB at $3.15 (as of 2026-10-12) vs. $11.89 at IPO; S&amp;P 500 at $7,807.24 today vs. $3,662.45 on 2020-12-01. Price appreciation only — dividends not included on either side.</div>
+    <div class="bt-note">Based on GRAB at $3.02 (as of 2026-10-13) vs. $11.89 at IPO; S&amp;P 500 at $7,804.11 today vs. $3,662.45 on 2020-12-01. Price appreciation only — dividends not included on either side.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1855612/000185561226000020/ck0001855612-20251231.htm" target="_blank" rel="noopener">SEC 20-F filing</a><a href="https://finance.yahoo.com/quote/GRAB" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="GRAB" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="SE" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Sea Ltd</div>
@@ -580,7 +648,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> Singapore · <strong>Founder:</strong> Forrest Li · <strong>Network effect:</strong> [Established] Sea Limited operates established network effects across its three core businesses: Garena&#x27;s gaming platform benefits from multiplayer network effects, Shopee&#x27;s e-commerce marketplace creates two-sided network effects between buyers and sellers with switching costs, and SeaMoney&#x27;s digital payments grows more valuable as merchant and user adoption increases.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 58.7B USD · <strong>P/E:</strong> 37.0 (fwd 18.4) · <strong>52-wk range:</strong> 77.05–184.96 USD · <strong>Beta:</strong> 1.55 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 59.2B USD · <strong>P/E:</strong> 37.3 (fwd 18.6) · <strong>52-wk range:</strong> 77.05–184.96 USD · <strong>Beta:</strong> 1.55 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Founder and Chief Executive Officer; Chairman of Sea Limited Ownership stake: 16.0% (as of 2026-04-17).</div>
       
       
@@ -589,23 +657,24 @@
     <div class="bt-row">
       <div class="bt-label">SE</div>
       <div class="bt-track"><div class="bt-fill stock" style="width:100.0%"></div></div>
-      <div class="bt-value">~$590</div>
+      <div class="bt-value">~$595</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
-      <div class="bt-track"><div class="bt-fill index" style="width:51.4%"></div></div>
+      <div class="bt-track"><div class="bt-fill index" style="width:50.9%"></div></div>
       <div class="bt-value">~$303</div>
     </div>
-    <div class="bt-note">Based on SE at $95.88 (as of 2026-10-12) vs. $16.26 at IPO; S&amp;P 500 at $7,807.24 today vs. $2,575.21 on 2017-10-20. Price appreciation only — dividends not included on either side.</div>
+    <div class="bt-note">Based on SE at $96.72 (as of 2026-10-13) vs. $16.26 at IPO; S&amp;P 500 at $7,804.11 today vs. $2,575.21 on 2017-10-20. Price appreciation only — dividends not included on either side.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1703399/000114036126015366/ef20067274_20f.htm" target="_blank" rel="noopener">SEC 20-F filing</a><a href="https://finance.yahoo.com/quote/SE" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="SE" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="0700.HK" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Tencent Holdings</div>
@@ -613,7 +682,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> Hong Kong · <strong>Founder:</strong> Ma Huateng (Pony Ma) · <strong>Network effect:</strong> [Established] Tencent operates an established network effect through WeChat/Weixin, its dominant social messaging and payments platform with over a billion users where the value increases as more users, merchants, and mini-program developers join the ecosystem, creating substantial switching costs and multi-sided network dynamics that have compounded for over a decade.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 3.8T HKD · <strong>P/E:</strong> 15.0 (fwd 11.8) · <strong>52-wk range:</strong> 411.00–664.00 HKD · <strong>Beta:</strong> 0.74 · <strong>Dividend yield:</strong> 1.25% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 3.8T HKD · <strong>P/E:</strong> 15.0 (fwd 11.8) · <strong>52-wk range:</strong> 411.00–664.00 HKD · <strong>Beta:</strong> 0.74 · <strong>Dividend yield:</strong> 1.24% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Chairman and Chief Executive Officer Ownership stake: not disclosed (as of 2026-09-23).</div>
       
       
@@ -622,23 +691,24 @@
     <div class="bt-row">
       <div class="bt-label">0700.HK</div>
       <div class="bt-track"><div class="bt-fill stock" style="width:100.0%"></div></div>
-      <div class="bt-value">~55,650 HKD</div>
+      <div class="bt-value">~55,572 HKD</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
       <div class="bt-track"><div class="bt-fill index" style="width:1.2%"></div></div>
-      <div class="bt-value">~$689</div>
+      <div class="bt-value">~$688</div>
     </div>
-    <div class="bt-note">Based on 0700.HK at HKD 425.80 (as of 2026-10-12) vs. HKD 0.77 at IPO; S&amp;P 500 at $7,807.24 today vs. $1,133.56 on 2004-06-16. Price appreciation only — dividends not included on either side. The 0700.HK figures are in HKD, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
+    <div class="bt-note">Based on 0700.HK at HKD 425.20 (as of 2026-10-13) vs. HKD 0.77 at IPO; S&amp;P 500 at $7,804.11 today vs. $1,133.56 on 2004-06-16. Price appreciation only — dividends not included on either side. The 0700.HK figures are in HKD, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.tencent.com/en-us/investors/board-members.html" target="_blank" rel="noopener">SEC HK filing</a><a href="https://finance.yahoo.com/quote/0700.HK" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="0700.HK" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="ZAL.DE" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Zalando</div>
@@ -646,7 +716,7 @@
       </div>
       <div class="flag high">Founder-CEO tier</div>
       <div class="meta"><strong>HQ:</strong> Germany · <strong>Founder:</strong> Robert Gentz · <strong>Network effect:</strong> [Established] Zalando operates an established two-sided marketplace connecting fashion brands and retailers with consumers across Europe, benefiting from network effects as more sellers attract more buyers and vice versa, with infrastructure and logistics creating switching costs.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 5.9B EUR · <strong>P/E:</strong> 61.9 (fwd 13.0) · <strong>52-wk range:</strong> 18.61–30.43 EUR · <strong>Beta:</strong> 1.55 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 6.0B EUR · <strong>P/E:</strong> 62.5 (fwd 13.1) · <strong>52-wk range:</strong> 18.61–30.43 EUR · <strong>Beta:</strong> 1.55 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Robert Gentz is Co-founder and co-CEO of Zalando SE Ownership stake: not disclosed (as of 2026-09-14).</div>
       
       
@@ -654,24 +724,25 @@
     <div class="backtest-title">$100 invested at IPO (2014-10-01) vs. S&amp;P 500</div>
     <div class="bt-row">
       <div class="bt-label">ZAL.DE</div>
-      <div class="bt-track"><div class="bt-fill stock" style="width:28.0%"></div></div>
-      <div class="bt-value">~112 EUR</div>
+      <div class="bt-track"><div class="bt-fill stock" style="width:28.3%"></div></div>
+      <div class="bt-value">~113 EUR</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
       <div class="bt-track"><div class="bt-fill index" style="width:100.0%"></div></div>
       <div class="bt-value">~$401</div>
     </div>
-    <div class="bt-note">Based on ZAL.DE at EUR 24.14 (as of 2026-10-12) vs. EUR 21.50 at IPO; S&amp;P 500 at $7,807.24 today vs. $1,946.16 on 2014-10-01. Price appreciation only — dividends not included on either side. The ZAL.DE figures are in EUR, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
+    <div class="bt-note">Based on ZAL.DE at EUR 24.38 (as of 2026-10-13) vs. EUR 21.50 at IPO; S&amp;P 500 at $7,804.11 today vs. $1,946.16 on 2014-10-01. Price appreciation only — dividends not included on either side. The ZAL.DE figures are in EUR, the S&amp;P 500 figures in USD — not adjusted for exchange-rate movement, so these show each investment's own growth in its own currency, not a literal side-by-side dollar comparison.</div>
   </div>
       <div class="notes"><span class="notes-label">Your notes:</span><ul><li><span class="note-date">2026-08-19</span> — ownership_pct unavailable for both Zalando co-founders (Robert Gentz, David Schneider): the only source disclosing their combined stake (~5%) is a PNG chart on corporate.zalando.com/en/investor-relations/shareholder-structure, not machine-readable text this pipeline can extract. BaFin&#x27;s WpHG voting-rights database has nothing on file for either individually (both below the 3% mandatory disclosure threshold). CONSEQUENCE: if either founder&#x27;s leadership status changes (e.g. steps back from CEO to Chairman), the automated Founder-Chair vs. Founder-departed classification cannot verify the required &gt;5% ownership threshold from any scraped source. Check the shareholder-structure page manually before trusting that classification.</li></ul></div>
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://corporate.zalando.com/en/investor-relations/our-management-board" target="_blank" rel="noopener">SEC DE filing</a><a href="https://finance.yahoo.com/quote/ZAL.DE" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="ZAL.DE" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="ARE" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">ALEXANDRIA REAL ESTATE EQUITIES, INC.</div>
@@ -702,9 +773,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1035443/000103544326000031/are-20260331.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/ARE" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="ARE" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="AMZN" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">AMAZON COM INC</div>
@@ -735,9 +807,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1018724/000110465926041026/tm261382-1_def14a.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/AMZN" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="AMZN" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="ARES" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">Ares Management Corp</div>
@@ -768,9 +841,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1176948/000162828026026286/ares-20260420.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/ARES" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="ARES" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="MELI" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">MERCADOLIBRE INC</div>
@@ -778,7 +852,7 @@
       </div>
       <div class="flag moderate">Founder-Chair tier</div>
       <div class="meta"><strong>HQ:</strong> Uruguay · <strong>Founder:</strong> Marcos Galperin · <strong>Network effect:</strong> [Established] MercadoLibre operates an established two-sided marketplace connecting millions of buyers and sellers across Latin America, with strong network effects where more buyers attract more sellers and vice versa, reinforced by integrated fintech services (Mercado Pago) and logistics infrastructure that create significant switching costs and barriers to entry.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 95.9B USD · <strong>P/E:</strong> 51.5 (fwd 33.6) · <strong>52-wk range:</strong> 1,495.00–2,428.00 USD · <strong>Beta:</strong> 1.31 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 95.6B USD · <strong>P/E:</strong> 51.3 (fwd 33.5) · <strong>52-wk range:</strong> 1,495.00–2,428.00 USD · <strong>Beta:</strong> 1.31 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">Executive Chairman of the Board Ownership stake: 7.0% (as of 2026-04-23).</div>
       
       
@@ -787,23 +861,24 @@
     <div class="bt-row">
       <div class="bt-label">MELI</div>
       <div class="bt-track"><div class="bt-fill stock" style="width:100.0%"></div></div>
-      <div class="bt-value">~$6,640</div>
+      <div class="bt-value">~$6,613</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
       <div class="bt-track"><div class="bt-fill index" style="width:8.1%"></div></div>
       <div class="bt-value">~$537</div>
     </div>
-    <div class="bt-note">Based on MELI at $1,892.44 (as of 2026-10-12) vs. $28.50 at IPO; S&amp;P 500 at $7,807.24 today vs. $1,453.64 on 2007-08-10. Price appreciation only — dividends not included on either side.</div>
+    <div class="bt-note">Based on MELI at $1,884.83 (as of 2026-10-13) vs. $28.50 at IPO; S&amp;P 500 at $7,804.11 today vs. $1,453.64 on 2007-08-10. Price appreciation only — dividends not included on either side.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1099590/000109959026000010/meli-20260423.htm" target="_blank" rel="noopener">SEC DEF 14A filing</a><a href="https://finance.yahoo.com/quote/MELI" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="MELI" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div><h3 class="subsection-title">No longer founder-led</h3><p class="sub">The founder has since left, so these no longer match this screener's founder-led thesis — but the company is still a live, tradable listing, which is why these sit here rather than in the delisted/acquired Archive below.</p>
-  <div class="card">
+  <div class="card" data-entry-id="035420.KS" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">NAVER CORP</div>
@@ -820,9 +895,10 @@
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://finance.yahoo.com/quote/035420.KS" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="035420.KS" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
-  <div class="card">
+  <div class="card" data-entry-id="PDD" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">PDD Holdings Inc.</div>
@@ -830,7 +906,7 @@
       </div>
       <div class="flag early">Founder-departed</div>
       <div class="meta"><strong>HQ:</strong> China · <strong>Founder:</strong> Colin Huang · <strong>Network effect:</strong> [Established] PDD Holdings (operating Pinduoduo and Temu) has an established network effect as a two-sided marketplace where more buyers attract more sellers and vice versa, with its social shopping and group-buying features creating additional viral growth loops that have scaled globally over multiple years.</div>
-      <div class="meta valuation"><strong>Market cap:</strong> 115.2B USD · <strong>P/E:</strong> 9.1 (fwd 6.6) · <strong>52-wk range:</strong> 71.94–139.41 USD · <strong>Beta:</strong> -0.05 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-12)</span></div>
+      <div class="meta valuation"><strong>Market cap:</strong> 117.5B USD · <strong>P/E:</strong> 9.3 (fwd 6.7) · <strong>52-wk range:</strong> 71.94–139.41 USD · <strong>Beta:</strong> -0.05 · <strong>Dividend yield:</strong> 0.00% <span class="valuation-as-of">(as of 2026-10-13)</span></div>
       <div class="read">No active leadership role; Zheng Huang is listed only as a principal shareholder, not among directors and executive officers Ownership stake: 24.8% (as of 2026-04-29).</div>
       
       
@@ -839,20 +915,21 @@
     <div class="bt-row">
       <div class="bt-label">PDD</div>
       <div class="bt-track"><div class="bt-fill stock" style="width:100.0%"></div></div>
-      <div class="bt-value">~$303</div>
+      <div class="bt-value">~$309</div>
     </div>
     <div class="bt-row">
       <div class="bt-label">S&amp;P 500</div>
-      <div class="bt-track"><div class="bt-fill index" style="width:90.8%"></div></div>
+      <div class="bt-track"><div class="bt-fill index" style="width:89.0%"></div></div>
       <div class="bt-value">~$275</div>
     </div>
-    <div class="bt-note">Based on PDD at $80.92 (as of 2026-10-12) vs. $26.70 at IPO; S&amp;P 500 at $7,807.24 today vs. $2,837.44 on 2018-07-26. Price appreciation only — dividends not included on either side.</div>
+    <div class="bt-note">Based on PDD at $82.54 (as of 2026-10-13) vs. $26.70 at IPO; S&amp;P 500 at $7,804.11 today vs. $2,837.44 on 2018-07-26. Price appreciation only — dividends not included on either side.</div>
   </div>
       
     </div>
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       <a href="https://www.sec.gov/Archives/edgar/data/1737806/000110465926050727/pdd-20251231x20f.htm" target="_blank" rel="noopener">SEC 20-F filing</a><a href="https://finance.yahoo.com/quote/PDD" target="_blank" rel="noopener">Current price</a>
+      <button type="button" class="my-watchlist-toggle" aria-pressed="false" data-entry-id="PDD" data-entry-type="founder_stock">+ My watchlist</button>
     </div>
   </div>
 
@@ -861,5 +938,90 @@
   </footer>
 
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function() {
+  var client = supabase.createClient("https://ialvlzbccpelqmebomhk.supabase.co", "sb_publishable_qGBXMEDLT-AAkfgicGYrsg_k4f951PG");
+  var signinArea = document.getElementById('my-watchlist-signin');
+  var signedInArea = document.getElementById('my-watchlist-signedin');
+  var listArea = document.getElementById('my-watchlist-list');
+  var emailForm = document.getElementById('my-watchlist-email-form');
+  var emailInput = document.getElementById('my-watchlist-email');
+  var emailStatus = document.getElementById('my-watchlist-email-status');
+  var signoutBtn = document.getElementById('my-watchlist-signout');
+  var userEmailLabel = document.getElementById('my-watchlist-user-email');
+
+  async function refreshWatchlistUI(session) {
+    var buttons = document.querySelectorAll('.my-watchlist-toggle');
+    if (!session) {
+      signinArea.style.display = '';
+      signedInArea.style.display = 'none';
+      buttons.forEach(function(btn) {
+        btn.textContent = '+ My watchlist';
+        btn.setAttribute('aria-pressed', 'false');
+      });
+      listArea.innerHTML = '<p class="sub">Sign in above to keep your own personal watchlist.</p>';
+      return;
+    }
+    signinArea.style.display = 'none';
+    signedInArea.style.display = '';
+    userEmailLabel.textContent = session.user.email || '';
+
+    var result = await client.from('user_watchlist').select('entry_id').eq('user_id', session.user.id);
+    var ids = new Set((result.data || []).map(function(r) { return r.entry_id; }));
+
+    buttons.forEach(function(btn) {
+      var on = ids.has(btn.dataset.entryId);
+      btn.textContent = on ? '\u2713 In my watchlist' : '+ My watchlist';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+
+    if (ids.size === 0) {
+      listArea.innerHTML = '<p class="sub">Your personal watchlist is empty \u2014 click \u201c+ My watchlist\u201d on any card below to add it here.</p>';
+      return;
+    }
+    listArea.innerHTML = '';
+    ids.forEach(function(id) {
+      var card = document.querySelector('.card[data-entry-id="' + CSS.escape(id) + '"]');
+      if (card) listArea.appendChild(card.cloneNode(true));
+    });
+  }
+
+  client.auth.onAuthStateChange(function(_event, session) { refreshWatchlistUI(session); });
+  client.auth.getSession().then(function(res) { refreshWatchlistUI(res.data.session); });
+
+  emailForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    emailStatus.textContent = 'Sending link\u2026';
+    var res = await client.auth.signInWithOtp({
+      email: emailInput.value.trim(),
+      options: { emailRedirectTo: window.location.href }
+    });
+    emailStatus.textContent = res.error ? ('Error: ' + res.error.message) : 'Check your email for a sign-in link.';
+  });
+
+  signoutBtn.addEventListener('click', async function() { await client.auth.signOut(); });
+
+  document.addEventListener('click', async function(e) {
+    var btn = e.target.closest('.my-watchlist-toggle');
+    if (!btn) return;
+    var sessionRes = await client.auth.getSession();
+    var session = sessionRes.data.session;
+    if (!session) { alert('Sign in above first to use your personal watchlist.'); return; }
+    var entryId = btn.dataset.entryId;
+    var entryType = btn.dataset.entryType;
+    var isOn = btn.getAttribute('aria-pressed') === 'true';
+    btn.disabled = true;
+    if (isOn) {
+      await client.from('user_watchlist').delete().eq('user_id', session.user.id).eq('entry_id', entryId);
+    } else {
+      await client.from('user_watchlist').upsert({ user_id: session.user.id, entry_id: entryId, entry_type: entryType });
+    }
+    btn.disabled = false;
+    refreshWatchlistUI(session);
+  });
+})();
+</script>
 </body>
 </html>
