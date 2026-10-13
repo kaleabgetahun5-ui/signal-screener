@@ -36,6 +36,19 @@ OPENDART_API_KEY = os.environ.get("OPENDART_API_KEY")
 
 ALLOWED_CONFIDENCE_FLAGS = ("High signal", "Moderate signal", "Early stage")
 
+# Per-visitor personal watchlists on the public site (distinct from the
+# single owner-curated "Your watchlist" section, which stays exactly as it
+# was — CLI-only, baked in at generate-site time). This is the only part of
+# the site that isn't a static snapshot: the generated page embeds these two
+# values directly (SUPABASE_ANON_KEY is a public, publishable key by
+# Supabase's own design — safe to ship in client-side HTML, unlike a
+# service-role key, which must never appear here) and the page's own
+# JavaScript talks to Supabase directly from each visitor's browser. Both
+# unset simply means the personal-watchlist UI doesn't render at all (see
+# site.py's SUPABASE_CONFIGURED) — the rest of the site is unaffected.
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
+
 # Weekly email digest (MVP roadmap step 4). SMTP rather than a provider API
 # so the pipeline stays self-contained and can run unattended from a
 # scheduled job, not just from within an authenticated chat session.

@@ -512,3 +512,87 @@ def test_no_notes_section_when_entry_has_no_notes(tmp_path, monkeypatch):
     html_out = site.build_site_html()
     assert "Test Co" in html_out
     assert "Your notes" not in html_out
+
+
+def _reload_with_supabase(tmp_path, monkeypatch, url, anon_key):
+    """Like _reload, but also sets config.SUPABASE_URL/ANON_KEY before
+    site.py is (re)imported — SUPABASE_CONFIGURED is computed once at
+    import time, same pattern as every other optional-feature flag in this
+    codebase (e.g. OPENFIGI_API_KEY)."""
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(config, "SUPABASE_URL", url)
+    monkeypatch.setattr(config, "SUPABASE_ANON_KEY", anon_key)
+    importlib.reload(importlib.import_module("signal_screener.db"))
+    return importlib.reload(importlib.import_module("signal_screener.site"))
+
+
+def test_personal_watchlist_hidden_when_supabase_not_configured(tmp_path, monkeypatch):
+    """Default state (no .env / no secrets set, same as this project ran
+    before this feature existed): the page renders exactly as it always
+    has — no sign-in widget, no visible toggle buttons, no Supabase script
+    tag pulled in from a CDN for visitors who never asked for it."""
+    site = _reload_with_supabase(tmp_path, monkeypatch, None, None)
+    html_out = site.build_site_html()
+    # The CSS rule body.supabase-enabled{...} is static and always present
+    # (harmless — it just never matches anything) — what must NOT appear is
+    # the class actually being applied to <body>, plus everything else that
+    # only shows up when this feature is active.
+    assert "<body>" in html_out
+    assert '<body class="supabase-enabled">' not in html_out
+    assert "My personal watchlist" not in html_out
+    assert "supabase-js" not in html_out
+    assert "signInWithOtp" not in html_out
+
+
+def test_personal_watchlist_renders_when_supabase_configured(tmp_path, monkeypatch):
+    site = _reload_with_supabase(
+        tmp_path, monkeypatch, "https://example.supabase.co", "test-anon-key-123"
+    )
+    db = importlib.import_module("signal_screener.db")
+    from signal_screener.models import Company, Designation
+
+    db.init_db()
+    with db.connect() as conn:
+        db.upsert_company(
+            conn,
+            Company(
+                ticker="TEST",
+                company_name="Test Co",
+                ticker_verified=True,
+                listing_type="ADR",
+                founder_tier="Founder-CEO",
+            ),
+        )
+        db.upsert_designation(
+            conn,
+            Designation(
+                designation_id="desig-abc",
+                ticker="TEST",
+                source="FDA",
+                type="Breakthrough Therapy",
+                date_granted="2026-01-01",
+                drug_name="Test Drug",
+                indication="Test indication",
+                trial_id=None,
+                data_source="unit_test",
+                data_as_of_date="2026-01-01",
+                raw_company_name="Test Co",
+            ),
+        )
+
+    html_out = site.build_site_html()
+    # Body gets the enabling class, the sign-in UI and Supabase config show
+    # up, and both card types carry the data attributes the page's JS keys
+    # off of.
+    assert '<body class="supabase-enabled">' in html_out
+    assert "My personal watchlist" in html_out
+    assert "Email me a sign-in link" in html_out
+    assert "https://example.supabase.co" in html_out
+    assert "test-anon-key-123" in html_out
+    assert 'data-entry-id="TEST" data-entry-type="founder_stock"' in html_out
+    assert 'data-entry-id="desig-abc" data-entry-type="designation"' in html_out
+    assert "+ My watchlist" in html_out
+    # Entirely separate from the owner's own CLI-managed watchlist section
+    # — this test never touched db.add_to_watchlist, so that section
+    # should still render its normal empty state.
+    assert "Your watchlist is empty" in html_out

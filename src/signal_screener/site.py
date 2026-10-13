@@ -35,9 +35,19 @@ because the company's listing status changed.
 """
 
 import html
+import json
 from datetime import date, datetime
 
-from signal_screener import db
+from signal_screener import config, db
+
+# Per-visitor personal watchlists (see config.py's SUPABASE_URL/ANON_KEY
+# comment). Gates every bit of the new markup below: with both unset, the
+# page renders byte-for-byte like it always has — no sign-in widget, no
+# "+ My watchlist" buttons shown (CSS keeps them display:none without this
+# class on <body>), no personal-watchlist section content, no Supabase
+# script tag. This stays entirely separate from the existing CLI-managed
+# "Your watchlist" section (watchlist_body below), which needs none of this.
+SUPABASE_CONFIGURED = bool(config.SUPABASE_URL and config.SUPABASE_ANON_KEY)
 
 CONFIDENCE_CLASS = {
     "High signal": "high",
@@ -143,6 +153,39 @@ CSS = """
   .new-since .card, .new-since .card.with-tab{margin-left:-1px; margin-right:-1px;}
 
   footer{margin-top:40px; font-size:12.5px; color:var(--ink-soft); line-height:1.75; border-top:1px solid var(--line); padding-top:18px;}
+
+  /* Per-visitor personal watchlist (Supabase-backed) — buttons stay hidden
+     unless the page was generated with Supabase configured, see
+     SUPABASE_CONFIGURED above. */
+  .my-watchlist-toggle{display:none;}
+  body.supabase-enabled .my-watchlist-toggle{
+    display:inline-flex; align-items:center; gap:6px; margin-left:auto;
+    font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft);
+    background:var(--bg); border:1px solid var(--line); border-radius:20px;
+    padding:4px 12px; cursor:pointer;
+  }
+  body.supabase-enabled .my-watchlist-toggle:hover{border-color:var(--ink-soft);}
+  body.supabase-enabled .my-watchlist-toggle[aria-pressed="true"]{
+    background:var(--high-bg); color:var(--high); border-color:var(--high);
+  }
+  body.supabase-enabled .verify-row{justify-content:space-between;}
+
+  .signin-box{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0 4px;}
+  .signin-box input[type="email"]{
+    font-family:'IBM Plex Sans', sans-serif; font-size:14px; padding:9px 12px;
+    border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink);
+    flex:1; min-width:200px;
+  }
+  .signin-box button{
+    font-family:'IBM Plex Sans', sans-serif; font-size:14px; font-weight:500; padding:9px 16px;
+    border:1px solid var(--ink); border-radius:6px; background:var(--ink); color:#fff; cursor:pointer;
+  }
+  .signin-status{font-size:13px; color:var(--ink-soft); margin-top:6px;}
+  .signedin-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0 4px;}
+  .signedin-row button{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; padding:5px 12px;
+    border:1px solid var(--line); border-radius:20px; background:var(--card); color:var(--ink-soft); cursor:pointer;
+  }
 """
 
 
@@ -152,6 +195,20 @@ def _flag_pill(label: str, css_class: str) -> str:
 
 def _verify_note() -> str:
     return '<span class="verify-note">ticker not independently verified</span>'
+
+
+def _watchlist_toggle_button(entry_id: str, entry_type: str) -> str:
+    """Hidden by default (see SUPABASE_CONFIGURED/.my-watchlist-toggle CSS)
+    — rendered unconditionally so the markup exists either way, but only
+    ever visible/functional when the page was generated with Supabase
+    configured. aria-pressed starts false; the page's own JS corrects it
+    per-visitor after checking who's signed in, since a static page can't
+    know that at generation time."""
+    entry_id_attr = html.escape(entry_id, quote=True)
+    return (
+        f'<button type="button" class="my-watchlist-toggle" aria-pressed="false" '
+        f'data-entry-id="{entry_id_attr}" data-entry-type="{entry_type}">+ My watchlist</button>'
+    )
 
 
 def _delisted_note(reason: str | None) -> str:
@@ -227,9 +284,11 @@ def _render_biotech_card(row, notes=()) -> str:
 
     delisted_html = _delisted_note(row["ticker_verification_reason"]) if delisted else ""
     notes_html = _notes_html(notes)
+    designation_id = html.escape(row["designation_id"], quote=True)
+    watchlist_btn = _watchlist_toggle_button(row["designation_id"], "designation")
 
     return f"""
-  <div class="card with-tab">
+  <div class="card with-tab" data-entry-id="{designation_id}" data-entry-type="designation">
     <div class="tab {tab_class}"></div>
     <div class="body">
       <div class="top-row">
@@ -245,6 +304,7 @@ def _render_biotech_card(row, notes=()) -> str:
       <div class="verify-row">
         <span class="verify-label">Verify:</span>
         {verify_html}
+        {watchlist_btn}
       </div>
     </div>
   </div>"""
@@ -448,9 +508,11 @@ def _render_founder_card(row, ownership, notes=()) -> str:
     backtest_html = _backtest_html(row)
 
     ticker_display = f"{exchange}: {ticker}" if exchange else ticker
+    entry_id_attr = html.escape(row["ticker"], quote=True)
+    watchlist_btn = _watchlist_toggle_button(row["ticker"], "founder_stock")
 
     return f"""
-  <div class="card">
+  <div class="card" data-entry-id="{entry_id_attr}" data-entry-type="founder_stock">
     <div class="card-head">
       <div class="top-row">
         <div class="company-name">{name}</div>
@@ -467,6 +529,7 @@ def _render_founder_card(row, ownership, notes=()) -> str:
     <div class="verify-row">
       <span class="verify-label">Verify:</span>
       {verify_html}
+      {watchlist_btn}
     </div>
   </div>"""
 
@@ -503,6 +566,130 @@ def _render_arbitrary_watchlist_card(row) -> str:
       <a href="https://finance.yahoo.com/quote/{ticker}" target="_blank" rel="noopener">Current price</a>
     </div>
   </div>"""
+
+
+def _personal_watchlist_section_html() -> str:
+    """The sign-in widget + per-visitor list container. Populated entirely
+    by _personal_watchlist_script() at view time via Supabase, from each
+    visitor's own browser — nothing here is baked in at generate-site time
+    (there's no "visitor" to bake data for when this HTML is generated)."""
+    return """
+  <h2 class="section-title">☆ My personal watchlist</h2>
+  <div class="new-since">
+    <p class="sub">Sign in with your email to keep your own private watchlist — separate from the owner's picks above. Click "+ My watchlist" on any card below to add it. No password: you'll get a one-time sign-in link by email.</p>
+    <div id="my-watchlist-signin" class="signin-box-wrap">
+      <form id="my-watchlist-email-form" class="signin-box">
+        <input type="email" id="my-watchlist-email" placeholder="you@example.com" required>
+        <button type="submit">Email me a sign-in link</button>
+      </form>
+      <div id="my-watchlist-email-status" class="signin-status"></div>
+    </div>
+    <div id="my-watchlist-signedin" class="signedin-row" style="display:none;">
+      <span class="sub">Signed in as <strong id="my-watchlist-user-email"></strong></span>
+      <button type="button" id="my-watchlist-signout">Sign out</button>
+    </div>
+    <div id="my-watchlist-list" style="margin-top:14px;">
+      <p class="sub">Sign in above to keep your own personal watchlist.</p>
+    </div>
+  </div>"""
+
+
+def _personal_watchlist_script() -> str:
+    """Runs entirely client-side, in each visitor's own browser — the
+    generated page itself stays a static snapshot (see module docstring);
+    this is the one piece of real-time behavior on it, scoped as narrowly
+    as possible (one table, three RLS policies, see
+    supabase_watchlist_schema.sql) and additive only: nothing here touches
+    the owner's own CLI-managed watchlist or any other section of the page.
+    SUPABASE_ANON_KEY is a public/publishable key by Supabase's own design
+    — safe to embed in a static public HTML file, unlike a service-role key."""
+    supabase_url_js = json.dumps(config.SUPABASE_URL)
+    supabase_anon_key_js = json.dumps(config.SUPABASE_ANON_KEY)
+    return f"""
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function() {{
+  var client = supabase.createClient({supabase_url_js}, {supabase_anon_key_js});
+  var signinArea = document.getElementById('my-watchlist-signin');
+  var signedInArea = document.getElementById('my-watchlist-signedin');
+  var listArea = document.getElementById('my-watchlist-list');
+  var emailForm = document.getElementById('my-watchlist-email-form');
+  var emailInput = document.getElementById('my-watchlist-email');
+  var emailStatus = document.getElementById('my-watchlist-email-status');
+  var signoutBtn = document.getElementById('my-watchlist-signout');
+  var userEmailLabel = document.getElementById('my-watchlist-user-email');
+
+  async function refreshWatchlistUI(session) {{
+    var buttons = document.querySelectorAll('.my-watchlist-toggle');
+    if (!session) {{
+      signinArea.style.display = '';
+      signedInArea.style.display = 'none';
+      buttons.forEach(function(btn) {{
+        btn.textContent = '+ My watchlist';
+        btn.setAttribute('aria-pressed', 'false');
+      }});
+      listArea.innerHTML = '<p class="sub">Sign in above to keep your own personal watchlist.</p>';
+      return;
+    }}
+    signinArea.style.display = 'none';
+    signedInArea.style.display = '';
+    userEmailLabel.textContent = session.user.email || '';
+
+    var result = await client.from('user_watchlist').select('entry_id').eq('user_id', session.user.id);
+    var ids = new Set((result.data || []).map(function(r) {{ return r.entry_id; }}));
+
+    buttons.forEach(function(btn) {{
+      var on = ids.has(btn.dataset.entryId);
+      btn.textContent = on ? '\\u2713 In my watchlist' : '+ My watchlist';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }});
+
+    if (ids.size === 0) {{
+      listArea.innerHTML = '<p class="sub">Your personal watchlist is empty \\u2014 click \\u201c+ My watchlist\\u201d on any card below to add it here.</p>';
+      return;
+    }}
+    listArea.innerHTML = '';
+    ids.forEach(function(id) {{
+      var card = document.querySelector('.card[data-entry-id="' + CSS.escape(id) + '"]');
+      if (card) listArea.appendChild(card.cloneNode(true));
+    }});
+  }}
+
+  client.auth.onAuthStateChange(function(_event, session) {{ refreshWatchlistUI(session); }});
+  client.auth.getSession().then(function(res) {{ refreshWatchlistUI(res.data.session); }});
+
+  emailForm.addEventListener('submit', async function(e) {{
+    e.preventDefault();
+    emailStatus.textContent = 'Sending link\\u2026';
+    var res = await client.auth.signInWithOtp({{
+      email: emailInput.value.trim(),
+      options: {{ emailRedirectTo: window.location.href }}
+    }});
+    emailStatus.textContent = res.error ? ('Error: ' + res.error.message) : 'Check your email for a sign-in link.';
+  }});
+
+  signoutBtn.addEventListener('click', async function() {{ await client.auth.signOut(); }});
+
+  document.addEventListener('click', async function(e) {{
+    var btn = e.target.closest('.my-watchlist-toggle');
+    if (!btn) return;
+    var sessionRes = await client.auth.getSession();
+    var session = sessionRes.data.session;
+    if (!session) {{ alert('Sign in above first to use your personal watchlist.'); return; }}
+    var entryId = btn.dataset.entryId;
+    var entryType = btn.dataset.entryType;
+    var isOn = btn.getAttribute('aria-pressed') === 'true';
+    btn.disabled = true;
+    if (isOn) {{
+      await client.from('user_watchlist').delete().eq('user_id', session.user.id).eq('entry_id', entryId);
+    }} else {{
+      await client.from('user_watchlist').upsert({{ user_id: session.user.id, entry_id: entryId, entry_type: entryType }});
+    }}
+    btn.disabled = false;
+    refreshWatchlistUI(session);
+  }});
+}})();
+</script>"""
 
 
 def _is_new(row, previous_generated_at: str | None) -> bool:
@@ -702,6 +889,9 @@ def build_site_html() -> str:
             )
 
     generated = date.today().isoformat()
+    body_class = ' class="supabase-enabled"' if SUPABASE_CONFIGURED else ""
+    personal_watchlist_section = _personal_watchlist_section_html() if SUPABASE_CONFIGURED else ""
+    personal_watchlist_script = _personal_watchlist_script() if SUPABASE_CONFIGURED else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -713,7 +903,7 @@ def build_site_html() -> str:
 {CSS}
 </style>
 </head>
-<body>
+<body{body_class}>
 <div class="wrap">
 
   <header>
@@ -735,6 +925,7 @@ def build_site_html() -> str:
   <div class="new-since">
     {watchlist_body}
   </div>
+  {personal_watchlist_section}
 
   <h2 class="section-title">Biotech signals</h2>
   {biotech_html}
@@ -751,6 +942,7 @@ def build_site_html() -> str:
   </footer>
 
 </div>
+{personal_watchlist_script}
 </body>
 </html>
 """
