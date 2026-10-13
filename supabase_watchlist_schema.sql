@@ -22,16 +22,23 @@ create table if not exists public.user_watchlist (
 -- itself, not by anything in the page's JavaScript.
 alter table public.user_watchlist enable row level security;
 
+-- drop-then-create (rather than a plain `create`) so this file is safe to
+-- re-run end-to-end — e.g. if an earlier run errored out partway through.
+-- CREATE POLICY has no IF NOT EXISTS form, so a plain create fails on rerun
+-- with "policy ... already exists" once it exists from a prior run.
+drop policy if exists "select own watchlist rows" on public.user_watchlist;
 create policy "select own watchlist rows"
   on public.user_watchlist for select
   to authenticated
   using (auth.uid() = user_id);
 
+drop policy if exists "insert own watchlist rows" on public.user_watchlist;
 create policy "insert own watchlist rows"
   on public.user_watchlist for insert
   to authenticated
   with check (auth.uid() = user_id);
 
+drop policy if exists "delete own watchlist rows" on public.user_watchlist;
 create policy "delete own watchlist rows"
   on public.user_watchlist for delete
   to authenticated
